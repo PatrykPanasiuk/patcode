@@ -1,0 +1,22 @@
+# Binaries
+patcode
+patcode.exe
+*.test
+*.out
+
+# Session data
+.patcode/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/

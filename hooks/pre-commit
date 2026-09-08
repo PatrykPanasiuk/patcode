@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Pre-commit secret scanner for PatCode.
+# Blocks commits that stage known secret patterns.
+# Install:  cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+set -euo pipefail
+
+# Patterns that should never appear in a commit.
+PATTERNS=(
+  'sk-or-v1-[A-Za-z0-9_-]{20,}'
+  'sk-ant-[A-Za-z0-9_-]{20,}'
+  'sk-[A-Za-z0-9]{24,}'
+  'ghp_[A-Za-z0-9]{30,}'
+  'github_pat_[A-Za-z0-9_]{30,}'
+  'AKIA[0-9A-Z]{16}'
+  '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----'
+  'xox[baprs]-[A-Za-z0-9-]{10,}'
+)
+
+FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
+if [ -z "$FILES" ]; then
+  exit 0
+fi
+
+# If gitleaks is available, prefer it (much more thorough).
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact 2>/dev/null && exit 0 || exit 1
+fi
+
+violations=0
+while IFS= read -r file; do
+  [ -f "$file" ] || continue
+  for pat in "${PATTERNS[@]}"; do
+    if grep -qE -e "$pat" "$file"; then
+      echo "ERROR: potential secret detected in staged file: $file"
+      echo "  matching pattern: ${pat:0:40}..."
+      violations=1
+    fi
+  done
+done <<< "$FILES"
+
+if [ "$violations" -ne 0 ]; then
+  echo "Commit blocked. Remove the secret or use env vars (see config/secrets.go)."
+  echo "If this is a false positive, commit with:  git commit --no-verify"
+  exit 1
+fi
+
+exit 0

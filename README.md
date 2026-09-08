@@ -12,7 +12,7 @@ It runs locally in your terminal, connects to LLM providers (OpenAI-compatible, 
 |---|---|
 | TUI (Bubble Tea) | implemented |
 | Headless `run` command | implemented |
-| Modes (ask, plan, build, shell) | implemented |
+| 13 agent modes with policy engine | implemented |
 | OpenAI-compatible provider | implemented |
 | Anthropic provider | implemented |
 | Ollama provider | implemented |
@@ -23,7 +23,8 @@ It runs locally in your terminal, connects to LLM providers (OpenAI-compatible, 
 | RAG memory bridge | experimental, requires external setup |
 | Local GGUF provider | stub — no inference backend wired |
 | Multi-step agent loop | partial — single tool-call round |
-| Hardened sandbox / permissions | not yet implemented |
+| Bash allow/deny-list and test-only policy | implemented |
+| Approval gates | partial — return error in headless mode |
 | Streaming tool-call aggregation | basic — may lose partial tool-call frames |
 | Release binaries | not yet available |
 
@@ -31,9 +32,10 @@ It runs locally in your terminal, connects to LLM providers (OpenAI-compatible, 
 
 - Terminal TUI built with [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 - Headless CLI via `patcode run`
-- Four modes controlling model behaviour: ask, plan, build, shell
+- 13 agent modes with a policy engine controlling tool access per mode
 - Provider abstraction with OpenAI-compatible, Anthropic, Ollama, local, and builtin backends
 - Tool set: read, write, edit, grep, glob, bash
+- Bash command allowlist/denylist and test-only policy in `test` and `ci` modes
 - Session persistence (JSON) for conversation history
 - Custom command templates from `patcode.yaml`
 - Optional RAG context bridge via Python/Postgres (experimental)
@@ -57,26 +59,51 @@ go build -o patcode .
 # Headless: ask about a project
 ./patcode run -p . --mode ask "Explain this project"
 
-# Headless: plan a refactor
+# Headless: inspect the codebase (read-only, search tools only)
+./patcode run -p . --mode inspect "Show me the directory structure"
+
+# Headless: plan a refactor (read + write investigations, no edits)
 ./patcode run -p . --mode plan "Plan a refactor of config loading"
 
-# Headless: execute changes
+# Headless: build changes (read, write, edit, bash — all with approval gates)
 ./patcode run -p . --mode build "Add tests for config loading"
 
-# Headless: run a shell command
+# Headless: run tests (test-only bash commands)
+./patcode run -p . --mode test "go test ./..."
+
+# Headless: CI (test-only bash, all tools available)
+./patcode run -p . --mode ci "Run the full CI pipeline"
+
+# Headless: run a shell command (direct passthrough, no LLM)
 ./patcode run -p . --mode shell "go test ./..."
 ```
 
 ## Modes
 
-| Mode | Behaviour |
-|---|---|
-| ask | Answer questions. No intentional file edits or tool execution. |
-| plan | Planning only. The model is instructed to produce a written plan without making changes. |
-| build | Coding tools (read, write, edit, grep, glob, bash) are exposed to the model. The agent can inspect and modify files. |
-| shell | The input is forwarded directly to a shell. No LLM invocation. |
+| Mode | Tool Access | Use Case |
+|---|---|---|
+| ask | none (LLM-only) | Knowledge questions, architectural discussions |
+| inspect | read, grep, glob | Codebase exploration, understanding structure |
+| plan | read, grep, glob | Research and planning, producing design docs |
+| review | read, grep, glob, write, edit | Code review with suggested edits |
+| audit | read, grep, glob | Security/quality audit — no modifications |
+| patch | read, grep, glob | Generating patch files or diffs (no write/edit) |
+| build | read, grep, glob, write, edit, bash | Implementing features and fixes (approval required for writes/edits/shell) |
+| fix | read, grep, glob, write, edit | Bug fixing (approval required for writes/edits) |
+| refactor | read, grep, glob, write, edit | Code restructuring with write access (approval required) |
+| scaffold | read, grep, glob, write, edit | Project scaffolding — create new files |
+| test | read, grep, glob, bash (test-only) | Writing and running tests |
+| ci | read, grep, glob, bash (test-only) | CI pipeline execution |
+| shell | direct passthrough | Arbitrary shell commands, no LLM invocation |
 
-**Warning:** `build` and `shell` modes can read, write, and execute arbitrary commands. Only use them in directories you trust.
+**Policy levels:**
+- `auto` — tool call executed automatically
+- `ask` — returns an error in headless mode (approval gate not wired yet)
+- `deny` — tool is blocked for this mode
+- `limited` — bash uses mode-specific allowlist (e.g. test-only commands)
+- `direct` — shell mode passthrough, no LLM involved
+
+**Warning:** `build`, `fix`, `refactor`, `scaffold`, and `shell` modes can read, write, and execute commands. Only use them in directories you trust.
 
 ## Configuration
 
@@ -95,7 +122,7 @@ permissions:
     - grep
 ```
 
-The permissions block describes intended auto-approval policy. It is **not** a hardened sandbox — enforcement depends on the caller and the current mode. Do not rely on it for security boundaries.
+The permissions block describes intended auto-approval policy. Tool enforcement is now wired through the permissions package, which checks each tool call against the current mode's policy (`auto`, `ask`, `deny`, `limited`). Bash commands are additionally validated against a global denylist and mode-specific allowlist. The system is **advisory** — there is no OS-level sandboxing.
 
 ### Custom commands
 
@@ -127,9 +154,7 @@ api_key: sk-...
 model: gpt-4o
 ```
 
-Uses the OpenAI Chat Completions API. Supports any OpenAI-compatible endpoint.
-
-**Note:** There is no dedicated `base_url` config field yet. To use a non-default endpoint (e.g. Together, Groq), set `model_path` to the base URL. This is a naming wart and should be cleaned up — currently `model_path` doubles as an API base URL for the `openai` provider.
+Uses the OpenAI Chat Completions API. Supports any OpenAI-compatible endpoint via the optional `base_url` field.
 
 ### Anthropic
 
@@ -140,6 +165,19 @@ model: claude-sonnet-4-20250514
 ```
 
 Uses the Anthropic Messages API with tool-use blocks.
+
+### OpenRouter
+
+```yaml
+provider: openrouter
+api_key: sk-or-v1-...
+model: openai/gpt-4o-mini
+base_url: https://openrouter.ai/api/v1
+```
+
+Uses the OpenAI-compatible endpoint. Prefer supplying the key via the
+environment (`OPENROUTER_API_KEY` or `PATCODE_API_KEY`) instead of a file —
+see [Security](#security).
 
 ### Local (experimental)
 
@@ -160,7 +198,7 @@ A purely deterministic pattern-matching provider for testing the TUI without a r
 
 ## Tools
 
-Available to the model in `build` mode:
+Available to the model depending on the active mode's policy:
 
 | Tool | Description | Risk |
 |---|---|---|
@@ -175,19 +213,22 @@ Available to the model in `build` mode:
 
 PatCode can read files, write files, and execute shell commands depending on the active mode and tool access.
 
+### Secrets handling
+
+- **Never commit API keys or tokens.** `patcode.yaml`, `.env`, `*.pem`, and key files are gitignored.
+- Prefer supplying keys via environment variables. Priority: provider-specific env var → `PATCODE_API_KEY` → value in config file. Supported vars: `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`.
+- A `pre-commit` hook (`hooks/pre-commit`) scans staged files for secret patterns and blocks the commit. Install with `cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit`. If gitleaks is installed it is used for deeper scanning.
+- Use `patcode.yaml.example` as a template; never copy a real key into a tracked file.
+
+### Runtime safety
+
 - Do **not** run it with elevated privileges (root, sudo).
 - Do **not** use it on directories containing secrets (`.env`, `id_rsa`, `~/.aws`, `~/.config/gh`) unless you fully understand the risk.
 - Treat model output and tool calls as **untrusted**. The model may generate paths, commands, or content you did not intend to execute.
-- Project-scoped sandboxing, path validation, symlink handling, and confirmation gates are **not yet implemented** and should be considered required hardening work.
-
-### Recommended hardening roadmap
-
-- Project-root path enforcement — reject absolute paths outside the target directory
-- Symlink escape protection
-- Explicit approval flow for bash, write, and edit
-- Command denylist / allowlist
-- Network command restrictions (curl, nc, ssh)
-- Audit log for every tool call with result
+- A policy engine enforces per-mode tool access (auto/ask/deny/limited) for every tool call at runtime.
+- Bash commands are validated against a global denylist (rm, sudo, curl, wget, ssh, scp, chmod, chown, dd, kubectl, docker) and mode-specific allowlists (e.g. test-only in `test` and `ci` modes).
+- There is **no OS-level sandboxing** — the policy engine is advisory, not a security boundary.
+- Symlink protection, path-scoped confinement, and interactive approval gates are **not yet implemented**.
 
 ## Architecture
 
@@ -198,10 +239,10 @@ patcode/
   config/     YAML configuration and project resolution
   llm/        provider abstraction (OpenAI, Anthropic, Ollama, local, builtin)
   memory/     memory export and ingestion helpers
-  permissions/  permission type definitions (wiring into tool execution not yet complete)
+  permissions/  tool-level policy engine and bash command validation
   ragbridge/  optional local RAG context bridge
-  session/    session persistence (JSON)
-  tools/      file, shell, and search tools
+  session/    session state, mode definitions, persistence (JSON)
+  tools/      file, shell, and search tools with runtime policy enforcement
   tui/        Bubble Tea terminal UI
 ```
 
@@ -226,7 +267,7 @@ go build ./...
 ## Limitations
 
 - **Early-stage MVP** — the project is functional but young.
-- **No hardened sandbox** — tool access controls are advisory, not enforced at the OS level.
+- **Policy engine is advisory** — per-mode tool access and bash allowlist/denylist are enforced in Go code, not at the OS level.
 - **Local provider is a stub** — no real GGUF inference is wired.
 - **Streaming tool-call handling is basic** — partial frames from the LLM may be lost.
 - **No release binaries** — you must build from source.
@@ -234,7 +275,8 @@ go build ./...
 
 ## Roadmap
 
-- Hardened permissions with path enforcement and confirmation gates
+- OS-level sandboxing and path-scoped confinement
+- Interactive approval UI for ask-level tools
 - Multi-step agent loop (multiple tool-call rounds per turn)
 - Robust streaming tool-call aggregation with retry
 - CI with tests, vet, and govulncheck

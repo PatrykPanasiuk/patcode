@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,11 +15,49 @@ import (
 type Mode string
 
 const (
-	ModePlan  Mode = "plan"
-	ModeAsk   Mode = "ask"
-	ModeBuild Mode = "build"
-	ModeShell Mode = "shell"
+	ModeAsk      Mode = "ask"
+	ModeInspect  Mode = "inspect"
+	ModePlan     Mode = "plan"
+	ModeReview   Mode = "review"
+	ModeAudit    Mode = "audit"
+	ModePatch    Mode = "patch"
+	ModeBuild    Mode = "build"
+	ModeFix      Mode = "fix"
+	ModeRefactor Mode = "refactor"
+	ModeScaffold Mode = "scaffold"
+	ModeTest     Mode = "test"
+	ModeCI       Mode = "ci"
+	ModeShell    Mode = "shell"
 )
+
+func (m Mode) String() string { return string(m) }
+
+var allModes = []Mode{
+	ModeAsk, ModeInspect, ModePlan, ModeReview, ModeAudit,
+	ModePatch, ModeBuild, ModeFix, ModeRefactor, ModeScaffold,
+	ModeTest, ModeCI, ModeShell,
+}
+
+func AllModes() []Mode {
+	return allModes
+}
+
+func ParseMode(s string) (Mode, error) {
+	for _, m := range allModes {
+		if string(m) == s {
+			return m, nil
+		}
+	}
+	var buf strings.Builder
+	buf.WriteString(fmt.Sprintf("unknown mode %q; available modes: ", s))
+	for i, m := range allModes {
+		if i > 0 {
+			buf.WriteString(", ")
+		}
+		buf.WriteString(string(m))
+	}
+	return "", fmt.Errorf(buf.String())
+}
 
 type Session struct {
 	ID        string        `json:"id"`

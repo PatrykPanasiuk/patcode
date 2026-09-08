@@ -1,0 +1,44 @@
+# PatCode configuration template — copy to patcode.yaml and fill in.
+
+# provider options: builtin, ollama, openai, openrouter, anthropic, local
+provider: openrouter
+
+# NEVER commit a real api_key. Provide it via the environment instead:
+#   export OPENROUTER_API_KEY=sk-or-v1-...
+# or set it here (this file is gitignored).
+api_key: ""
+
+model: openai/gpt-4o-mini
+base_url: https://openrouter.ai/api/v1
+temperature: 0.7
+max_tokens: 8192
+
+# Ollama example (local, no API key):
+# provider: ollama
+# model: llama3.2:1b
+
+permissions:
+  auto_approve:
+    - read
+    - glob
+    - grep
+  # default_deny:
+  #   - bash
+  #   - write
+  #   - edit
+
+theme:
+  primary: "#888888"
+  secondary: "#aaaaaa"
+  success: "#88aa88"
+  warning: "#aaaa88"
+  error: "#aa8888"
+
+# Session directory
+session_dir: ~/.patcode/sessions
+
+# Custom commands (optional)
+# commands:
+#   - name: "review"
+#     prompt: "Review this code for bugs and improvements: {0}"
+#     description: "Code review helper"

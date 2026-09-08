@@ -29,6 +29,7 @@ type Message struct {
 }
 
 type ToolCall struct {
+	Index    int              `json:"index,omitempty"`
 	ID       string           `json:"id"`
 	Type     string           `json:"type"`
 	Function ToolCallFunction `json:"function"`
@@ -81,21 +82,83 @@ const (
 	StreamError    StreamEventType = "error"
 )
 
-func NewProvider(providerType, apiKey, baseURL string) (Provider, error) {
-	switch providerType {
+type ProviderConfig struct {
+	Type      string
+	APIKey    string
+	Model     string
+	ModelPath string
+	BaseURL   string
+}
+
+func NewProvider(cfg ProviderConfig) (Provider, error) {
+	switch cfg.Type {
 	case "openai":
-		return NewOpenAIProvider(apiKey, baseURL), nil
+		baseURL := cfg.BaseURL
+		if baseURL == "" {
+			baseURL = cfg.ModelPath // fallback for legacy configs
+		}
+		return NewOpenAIProvider(cfg.APIKey, baseURL), nil
+	case "openrouter":
+		baseURL := cfg.BaseURL
+		if baseURL == "" {
+			baseURL = cfg.ModelPath // fallback for legacy configs
+		}
+		if baseURL == "" {
+			baseURL = "https://openrouter.ai/api/v1"
+		}
+		return NewOpenAIProvider(cfg.APIKey, baseURL), nil
 	case "anthropic":
-		return NewAnthropicProvider(apiKey, baseURL), nil
+		baseURL := cfg.BaseURL
+		if baseURL == "" {
+			baseURL = cfg.ModelPath
+		}
+		return NewAnthropicProvider(cfg.APIKey, baseURL), nil
 	case "ollama":
-		return NewOpenAIProvider("", "http://localhost:11434/v1"), nil
+		baseURL := cfg.BaseURL
+		if baseURL == "" {
+			baseURL = "http://localhost:11434/v1"
+		}
+		p := NewOpenAIProvider("", baseURL)
+		p.client = &http.Client{
+			Transport: &ollamaErrorTransport{inner: http.DefaultTransport},
+		}
+		return p, nil
 	case "local":
-		return NewLocalProvider(baseURL)
+		return NewLocalProvider(cfg.ModelPath)
 	case "builtin":
 		return NewBuiltinProvider(), nil
 	default:
 		return NewBuiltinProvider(), nil
 	}
+}
+
+type ollamaErrorTransport struct {
+	inner http.RoundTripper
+}
+
+func (t *ollamaErrorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.inner.RoundTrip(req)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"cannot reach Ollama at %s\n\n%s",
+			req.URL.Host,
+			ollamaTroubleshootHint(err),
+		)
+	}
+	return resp, nil
+}
+
+func ollamaTroubleshootHint(err error) string {
+	s := err.Error()
+	if strings.Contains(s, "connection refused") || strings.Contains(s, "no such host") {
+		return "Ollama may not be running. Start it with:\n  ollama serve\n\n" +
+			"Or install it from https://ollama.com/download\n\n" +
+			"If Ollama runs on a custom host/port, set base_url in patcode.yaml."
+	}
+	if strings.Contains(s, "timeout") {
+		return "Connection to Ollama timed out. Check that ollama serve is running."
+	}
+	return fmt.Sprintf("Connection error: %s", err)
 }
 
 type OpenAIProvider struct {
@@ -116,12 +179,50 @@ func NewOpenAIProvider(apiKey, baseURL string) *OpenAIProvider {
 }
 
 type openaiChatRequest struct {
-	Model       string                    `json:"model"`
-	Messages    []openaiMessage           `json:"messages"`
-	Tools       []tools.ToolDefinition    `json:"tools,omitempty"`
-	Temperature float64                   `json:"temperature"`
-	MaxTokens   int                       `json:"max_tokens"`
-	Stream      bool                      `json:"stream"`
+	Model       string        `json:"model"`
+	Messages    []openaiMessage `json:"messages"`
+	Tools       []openaiTool  `json:"tools,omitempty"`
+	Temperature float64       `json:"temperature"`
+	MaxTokens   int           `json:"max_tokens"`
+	Stream      bool          `json:"stream"`
+}
+
+// openaiTool is the OpenAI-compatible tool definition format:
+//
+//	{"type":"function","function":{"name","description","parameters"}}
+//
+// The project's ToolDefinition uses the Anthropic "input_schema" shape, so
+// tools must be converted to this format before being sent to OpenAI endpoints.
+type openaiTool struct {
+	Type     string           `json:"type"`
+	Function openaiToolFunction `json:"function"`
+}
+
+type openaiToolFunction struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Parameters  any    `json:"parameters"`
+}
+
+// toOpenAITools converts the shared Anthropic-style ToolDefinitions into the
+// OpenAI tool-call format required by OpenAI, OpenRouter, and Ollama's
+// OpenAI-compatible endpoint.
+func toOpenAITools(defs []tools.ToolDefinition) []openaiTool {
+	if len(defs) == 0 {
+		return nil
+	}
+	out := make([]openaiTool, 0, len(defs))
+	for _, d := range defs {
+		out = append(out, openaiTool{
+			Type: "function",
+			Function: openaiToolFunction{
+				Name:        d.Name,
+				Description: d.Description,
+				Parameters:  d.InputSchema,
+			},
+		})
+	}
+	return out
 }
 
 type openaiMessage struct {
@@ -187,7 +288,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		}}, body.Messages...)
 	}
 	if len(req.Tools) > 0 {
-		body.Tools = req.Tools
+		body.Tools = toOpenAITools(req.Tools)
 	}
 
 	data, _ := json.Marshal(body)
@@ -249,7 +350,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 		}}, body.Messages...)
 	}
 	if len(req.Tools) > 0 {
-		body.Tools = req.Tools
+		body.Tools = toOpenAITools(req.Tools)
 	}
 
 	data, _ := json.Marshal(body)

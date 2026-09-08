@@ -14,15 +14,24 @@ func (m *model) View() string {
 		return "Loading..."
 	}
 
+	header := m.renderHeader()
 	messages := m.renderMessages()
 	composer := m.renderComposer()
+	status := m.renderStatusBar()
 	modeBox := m.renderModeBox()
 
-	footer := composer + "\n" + modeBox
-	used := lipgloss.Height(messages) + lipgloss.Height(footer)
+	footer := composer + "\n" + status + "\n" + modeBox
+	used := lipgloss.Height(header+"\n") + lipgloss.Height(messages) + lipgloss.Height(footer)
 	spacer := strings.Repeat("\n", max(0, m.height-used))
 
-	return messages + spacer + footer
+	return header + "\n" + messages + spacer + footer
+}
+
+func (m *model) renderHeader() string {
+	if len(m.messages) > 0 {
+		return ""
+	}
+	return dimStyle.Render(asciiArt)
 }
 
 func (m *model) renderComposer() string {
@@ -129,14 +138,54 @@ func (m *model) renderModeBox() string {
 	return box
 }
 
+func (m *model) renderStatusBar() string {
+	modelLabel := m.providerModel
+	if modelLabel == "" {
+		modelLabel = "none"
+	}
+
+	statusColor := dimColor
+	statusDot := "●"
+	if m.providerReady {
+		statusColor = accent2Color
+		statusDot = "●"
+	}
+
+	left := lipgloss.NewStyle().Foreground(dimColor).Render(m.providerType)
+	right := lipgloss.NewStyle().Foreground(statusColor).Render(statusDot + " " + modelLabel)
+
+	return lipgloss.NewStyle().
+		Width(m.width - 4).
+		MaxWidth(m.width - 4).
+		Render(left + right)
+}
+
 func renderModeBoxStyle(mode session.Mode) lipgloss.Style {
 	switch mode {
-	case session.ModePlan:
-		return modePlanStyle
 	case session.ModeAsk:
 		return modeAskStyle
+	case session.ModeInspect:
+		return modeInspectStyle
+	case session.ModePlan:
+		return modePlanStyle
+	case session.ModeReview:
+		return modeReviewStyle
+	case session.ModeAudit:
+		return modeAuditStyle
+	case session.ModePatch:
+		return modePatchStyle
 	case session.ModeBuild:
 		return modeBuildStyle
+	case session.ModeFix:
+		return modeFixStyle
+	case session.ModeRefactor:
+		return modeRefactorStyle
+	case session.ModeScaffold:
+		return modeScaffoldStyle
+	case session.ModeTest:
+		return modeTestStyle
+	case session.ModeCI:
+		return modeCIStyle
 	case session.ModeShell:
 		return modeShellStyle
 	default:

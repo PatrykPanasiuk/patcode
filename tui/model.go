@@ -1,6 +1,7 @@
 package tui
 
 import (
+	_ "embed"
 	"context"
 	"fmt"
 	"os"
@@ -45,18 +46,30 @@ type model struct {
 	err error
 
 	cancelFunc context.CancelFunc
+
+	providerType string
+	providerModel string
+	providerReady bool
 }
 
-func initialModel(projectDir string) (*model, error) {
+const asciiArt = `.xX:$:
+   +;      X;       .   .+:.             :x$.          +XX:                .:+:
+   :;        :$.  x   $:x.   ;$x::+$;.;$    x; x+;:.  +    .X+.     .:;XX:   .&$
+    X.    .     x$.    $X           :&      ;&&     .X$.       ;X: X.        X&+
+    .$.   &&:    x. .  .&.  .       .X  .;  x&:       x&$.       .Xx;  :&&X+$&&.
+     ;;   ;.    :;  $x  .&&&&  :&X;xx  .&&&&&;   X&;   ;&+  :&;    :x  .:. $&;:
+     .$     .+$&x   :    .&.x   X&xx   X&+ .x   .&&+;   .x   &&$    +   .:+&&::
+    .;&.  .&&&XX    .+;   .&X   .&X    +$+X;x;   $x:+   ;&   ;X.   ;;  &&&&;. :&.
+    X  .   ;&.x:   x&&&.    +    $X          .+        :&X.       .x           ;&.
+   .x       &$x   .&&+.   ;&+    .&&&X.       .X      .&.      .$&&:          :&&X
+    ;&&x    $&:&&&X&X.&X&&&&x&&x.$&&.;X&&$: ;&&&&&&&$x&&.   +&&&&+.$&&&&$;  :&&&+
+      .;&&&&&$.  .;$:  .X;.   .:&&x.     .+&&&:    .:;$;+&&&&&:       .:;X&&&&;
+          ..                                              ..`
+
+func initialModel(projectDir string, cfg *config.Config) (*model, error) {
 	absDir, err := config.ResolveProjectDir(projectDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolving project directory: %w", err)
-	}
-
-	cfgPath := filepath.Join(absDir, "patcode.yaml")
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		return nil, fmt.Errorf("loading config: %w", err)
 	}
 
 	home, _ := os.UserHomeDir()
@@ -67,7 +80,13 @@ func initialModel(projectDir string) (*model, error) {
 
 	sess := session.New(absDir, saveDir)
 
-	provider, err := llm.NewProvider(string(cfg.Provider), cfg.APIKey, cfg.ModelPath)
+	provider, err := llm.NewProvider(llm.ProviderConfig{
+		Type:      string(cfg.Provider),
+		APIKey:    cfg.APIKey,
+		Model:     cfg.Model,
+		ModelPath: cfg.ModelPath,
+		BaseURL:   cfg.BaseURL,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("creating provider: %w", err)
 	}
@@ -91,23 +110,31 @@ func initialModel(projectDir string) (*model, error) {
 	s.Style = dimStyle
 
 	return &model{
-		projectDir:  absDir,
-		config:      cfg,
-		session:     sess,
-		agent:       ag,
-		provider:    provider,
-		messages:    []chatMessage{},
-		textarea: ti,
-		viewport: vp,
-		spinner:  s,
+		projectDir:    absDir,
+		config:        cfg,
+		session:       sess,
+		agent:         ag,
+		provider:      provider,
+		messages:      []chatMessage{},
+		textarea:      ti,
+		viewport:      vp,
+		spinner:       s,
+		providerType:  string(cfg.Provider),
+		providerModel: cfg.Model,
+		providerReady: string(cfg.Provider) != "builtin",
 	}, nil
 }
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(
-		textarea.Blink,
-		m.spinner.Tick,
-	)
+	cmds := []tea.Cmd{textarea.Blink, m.spinner.Tick}
+	if !m.providerReady {
+		m.messages = append(m.messages, chatMessage{
+			Role:    "system",
+			Content: "No AI model configured. Downloading the smallest model (smollm:135m via Ollama)...",
+		})
+		cmds = append(cmds, m.autoSetup())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *model) sendMessage(msg string) tea.Cmd {
@@ -152,14 +179,16 @@ func (m *model) runShell(command string) tea.Cmd {
 
 func (m *model) cycleMode() {
 	switch m.session.GetMode() {
-	case session.ModePlan:
-		m.session.SetMode(session.ModeAsk)
 	case session.ModeAsk:
+		m.session.SetMode(session.ModeInspect)
+	case session.ModeInspect:
+		m.session.SetMode(session.ModePlan)
+	case session.ModePlan:
 		m.session.SetMode(session.ModeBuild)
 	case session.ModeBuild:
 		m.session.SetMode(session.ModeShell)
 	default:
-		m.session.SetMode(session.ModePlan)
+		m.session.SetMode(session.ModeAsk)
 	}
 }
 
@@ -197,35 +226,81 @@ func (m *model) handleSlashCommand(cmd string) tea.Cmd {
 			m.messages = append(m.messages, chatMessage{
 				Role: "system",
 				Content: `patcode commands:
-  /help, /?   toggle help
-  /plan       plan mode (read-only)
-  /ask        ask mode (answer only)
-  /build      build mode (allow edits)
-  /shell      shell mode (run commands)
-  /mode       show mode
-  /clear      clear chat
-  /session    session info
-  /exit       quit
+  /help, /?       toggle help
+  /ask            ask mode (answer only)
+  /inspect        inspect mode (read-only)
+  /plan           plan mode (read-only)
+  /review         review mode (read-only)
+  /audit          audit mode (security review)
+  /patch          patch mode (diff only)
+  /build          build mode (allow edits)
+  /fix            fix mode (fix failures)
+  /refactor       refactor mode
+  /scaffold       scaffold mode (create files)
+  /test           test mode (run tests)
+  /ci             ci mode (automation)
+  /shell          shell mode (run commands)
+  /mode           show mode
+  /modes          list all modes
+  /clear          clear chat
+  /session        session info
+  /exit           quit
 
 shortcuts:
   Ctrl+C      cancel
   Ctrl+L      clear
   PgUp/PgDn   scroll
-  Tab         cycle mode`,
+  Tab         cycle modes: ask -> inspect -> plan -> build -> shell`,
 			})
 		}
-		return nil
-
-	case "/plan":
-		m.session.SetMode(session.ModePlan)
 		return nil
 
 	case "/ask":
 		m.session.SetMode(session.ModeAsk)
 		return nil
 
+	case "/inspect":
+		m.session.SetMode(session.ModeInspect)
+		return nil
+
+	case "/plan":
+		m.session.SetMode(session.ModePlan)
+		return nil
+
+	case "/review":
+		m.session.SetMode(session.ModeReview)
+		return nil
+
+	case "/audit":
+		m.session.SetMode(session.ModeAudit)
+		return nil
+
+	case "/patch":
+		m.session.SetMode(session.ModePatch)
+		return nil
+
 	case "/build":
 		m.session.SetMode(session.ModeBuild)
+		return nil
+
+	case "/fix":
+		m.session.SetMode(session.ModeFix)
+		return nil
+
+	case "/refactor":
+		m.session.SetMode(session.ModeRefactor)
+		return nil
+
+	case "/scaffold":
+		m.session.SetMode(session.ModeScaffold)
+		return nil
+
+	case "/test":
+		m.session.SetMode(session.ModeTest)
+		return nil
+
+	case "/ci":
+		m.session.SetMode(session.ModeCI)
 		return nil
 
 	case "/shell":
@@ -237,6 +312,15 @@ shortcuts:
 			Role:    "system",
 			Content: fmt.Sprintf("Current mode: %s", m.session.GetMode()),
 		})
+		return nil
+
+	case "/modes":
+		var sb strings.Builder
+		sb.WriteString("Available modes:\n")
+		for _, m := range session.AllModes() {
+			sb.WriteString(fmt.Sprintf("  /%-12s %s\n", string(m), modeDescription(m)))
+		}
+		m.messages = append(m.messages, chatMessage{Role: "system", Content: sb.String()})
 		return nil
 
 	case "/clear":
@@ -295,5 +379,38 @@ shortcuts:
 			Content: fmt.Sprintf("unknown: %s (/? for help)", parts[0]),
 		})
 		return nil
+	}
+}
+
+func modeDescription(m session.Mode) string {
+	switch m {
+	case session.ModeAsk:
+		return "General answers without tools"
+	case session.ModeInspect:
+		return "Read-only repository inspection"
+	case session.ModePlan:
+		return "Implementation planning"
+	case session.ModeReview:
+		return "Code/diff review"
+	case session.ModeAudit:
+		return "Security-focused review"
+	case session.ModePatch:
+		return "Generate diff without applying"
+	case session.ModeBuild:
+		return "Implement changes"
+	case session.ModeFix:
+		return "Fix failing tests/errors"
+	case session.ModeRefactor:
+		return "Behavior-preserving changes"
+	case session.ModeScaffold:
+		return "Create initial structure"
+	case session.ModeTest:
+		return "Run and explain tests/lints"
+	case session.ModeCI:
+		return "Automation-friendly checks"
+	case session.ModeShell:
+		return "Direct shell passthrough"
+	default:
+		return ""
 	}
 }

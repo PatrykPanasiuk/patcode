@@ -64,12 +64,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			if m.session.GetMode() == session.ModeAsk || m.session.GetMode() == session.ModePlan {
-				return m, m.sendMessage(input)
-			}
-
-			expanded := m.expandFileReferences(input)
-			return m, m.sendMessage(expanded)
+			return m, m.sendMessage(input)
 
 		case tea.KeyTab:
 			m.cycleMode()
@@ -152,6 +147,26 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case error:
 		m.err = msg
+		return m, nil
+
+	case setupDoneMsg:
+		if msg.err != nil {
+			m.providerType = "builtin"
+			m.providerModel = "setup failed"
+			m.messages = append(m.messages, chatMessage{
+				Role:    "system",
+				Content: fmt.Sprintf("Auto-setup failed: %s", msg.err),
+			})
+		} else {
+			m.providerType = "ollama"
+			m.providerModel = smallModel
+			m.providerReady = true
+			m.messages = append(m.messages, chatMessage{
+				Role:    "system",
+				Content: fmt.Sprintf("Model ready: Ollama + %s", smallModel),
+			})
+		}
+		m.viewport.GotoBottom()
 		return m, nil
 	}
 

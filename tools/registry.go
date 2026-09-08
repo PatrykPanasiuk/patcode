@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"patcode/permissions"
 )
 
 type ToolResult struct {
@@ -29,11 +31,16 @@ type Tool struct {
 }
 
 type Registry struct {
-	tools map[string]Tool
+	tools        map[string]Tool
+	currentMode  string
 }
 
 func NewRegistry() *Registry {
 	return &Registry{tools: make(map[string]Tool)}
+}
+
+func (r *Registry) SetMode(mode string) {
+	r.currentMode = mode
 }
 
 func (r *Registry) Register(t Tool) {
@@ -84,5 +91,59 @@ func (r *Registry) Execute(ctx context.Context, name string, args json.RawMessag
 			Error:   fmt.Sprintf("unknown tool: %s", name),
 		}
 	}
-	return tool.Execute(ctx, args)
+
+	perm := permissions.IsToolAllowed(r.currentMode, name)
+	switch perm {
+	case permissions.PermissionDeny:
+		return &ToolResult{
+			Success: false,
+			Error:   permissions.ToolDeniedError(r.currentMode, name),
+		}
+	case permissions.PermissionAsk:
+		return &ToolResult{
+			Success: false,
+			Error:   permissions.ToolAskError(r.currentMode, name),
+		}
+	case permissions.PermissionLimited:
+		if name == "bash" {
+			bashPolicy := permissions.BashPolicyForMode(r.currentMode)
+			var bashArgs struct {
+				Command string `json:"command"`
+			}
+			if err := json.Unmarshal(args, &bashArgs); err != nil {
+				return &ToolResult{
+					Success: false,
+					Error:   fmt.Sprintf("invalid bash args: %v", err),
+				}
+			}
+			if err := permissions.CheckBashCommand(bashArgs.Command, bashPolicy); err != nil {
+				return &ToolResult{
+					Success: false,
+					Error:   err.Error(),
+				}
+			}
+		}
+		return tool.Execute(ctx, args)
+	default:
+		return tool.Execute(ctx, args)
+	}
+}
+
+func (r *Registry) DefinitionsForMode(mode string) []ToolDefinition {
+	allowed := permissions.AllowedToolNames(mode)
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, n := range allowed {
+		allowedSet[n] = true
+	}
+	defs := make([]ToolDefinition, 0, len(allowed))
+	for _, t := range r.tools {
+		if allowedSet[t.Name] {
+			defs = append(defs, ToolDefinition{
+				Name:        t.Name,
+				Description: t.Description,
+				InputSchema: t.InputSchema,
+			})
+		}
+	}
+	return defs
 }

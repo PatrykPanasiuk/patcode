@@ -13,6 +13,7 @@ patcode.exe
 *.swp
 *.swo
 *~
+*.bak
 
 # OS
 .DS_Store
@@ -20,3 +21,17 @@ Thumbs.db
 
 # Go
 vendor/
+
+# Secrets & local config — NEVER commit these.
+# api_key / base_url live here; use env vars (PATCODE_API_KEY,
+# OPENROUTER_API_KEY, etc.) or a local untracked patcode.yaml instead.
+.env
+.env.*
+!.env.example
+patcode.yaml
+patcode.local.yaml
+*.pem
+*.key
+id_rsa
+id_ed25519
+credentials.json

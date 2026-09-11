@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 )
@@ -18,13 +19,13 @@ type BashArgs struct {
 func BashTool(workdir string) Tool {
 	return Tool{
 		Name:        "bash",
-		Description: "Execute a shell command with optional timeout and working directory",
+		Description: "Execute a shell command with optional timeout and working directory (argv-based, no shell metacharacters)",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"command": map[string]any{
 					"type":        "string",
-					"description": "The shell command to execute",
+					"description": "The command to execute. Quoting is supported; pipes, redirects, &&, ;, $(...) etc. are not.",
 				},
 				"timeout": map[string]any{
 					"type":        "integer",
@@ -53,6 +54,14 @@ func BashTool(workdir string) Tool {
 				}
 			}
 
+			argv, err := shellWords(bashArgs.Command)
+			if err != nil {
+				return &ToolResult{Success: false, Error: err.Error()}
+			}
+			if len(argv) == 0 {
+				return &ToolResult{Success: false, Error: "empty command"}
+			}
+
 			timeout := 120000
 			if bashArgs.Timeout > 0 {
 				timeout = bashArgs.Timeout
@@ -66,14 +75,32 @@ func BashTool(workdir string) Tool {
 			ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 			defer cancel()
 
-			cmd := exec.CommandContext(ctx, "bash", "-c", bashArgs.Command)
+			var cmd *exec.Cmd
+			if os.Getenv("PATCODE_BASH_SHELL") == "1" && hasUnsafeShellChars(bashArgs.Command) {
+				// Explicit escape hatch: user opted back into full shell
+				// passthrough. This re-enables the injection surface.
+				cmd = exec.CommandContext(ctx, "bash", "-c", bashArgs.Command)
+			} else if hasUnsafeShellChars(bashArgs.Command) {
+				return &ToolResult{
+					Success: false,
+					Error: fmt.Sprintf(
+						"command contains shell metacharacters (%q); "+
+							"patcode runs commands as argv without a shell for safety. "+
+							"Avoid pipes/redirects/&&/;/$(...); set PATCODE_BASH_SHELL=1 to opt back into bash -c.",
+						bashArgs.Command,
+					),
+				}
+			} else {
+				cmd = exec.CommandContext(ctx, argv[0], argv[1:]...)
+			}
 			cmd.Dir = cmdWorkdir
+			cmd.Env = os.Environ()
 
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
 
-			err := cmd.Run()
+			err = cmd.Run()
 
 			result := &ToolResult{
 				Success: err == nil,

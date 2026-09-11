@@ -9,6 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const DefaultMaxTurns = 8
+
 type Provider string
 
 const (
@@ -21,17 +23,18 @@ const (
 )
 
 type Config struct {
-	Provider    Provider       `yaml:"provider"`
-	APIKey      string         `yaml:"api_key,omitempty"`
-	Model       string         `yaml:"model"`
-	ModelPath   string         `yaml:"model_path,omitempty"`
-	BaseURL     string         `yaml:"base_url,omitempty"`
-	Temperature float64        `yaml:"temperature"`
-	MaxTokens   int            `yaml:"max_tokens"`
-	Permissions Permissions    `yaml:"permissions"`
-	Theme       Theme          `yaml:"theme"`
-	SessionDir  string         `yaml:"session_dir"`
-	Agents      []AgentConfig  `yaml:"agents,omitempty"`
+	Provider    Provider        `yaml:"provider"`
+	APIKey      string          `yaml:"api_key,omitempty"`
+	Model       string          `yaml:"model"`
+	ModelPath   string          `yaml:"model_path,omitempty"`
+	BaseURL     string          `yaml:"base_url,omitempty"`
+	Temperature float64         `yaml:"temperature"`
+	MaxTokens   int             `yaml:"max_tokens"`
+	MaxTurns    int             `yaml:"max_turns"`
+	Permissions Permissions     `yaml:"permissions"`
+	Theme       Theme           `yaml:"theme"`
+	SessionDir  string          `yaml:"session_dir"`
+	Agents      []AgentConfig   `yaml:"agents,omitempty"`
 	Commands    []CustomCommand `yaml:"commands,omitempty"`
 }
 
@@ -49,10 +52,10 @@ type Theme struct {
 }
 
 type AgentConfig struct {
-	Name        string   `yaml:"name"`
-	Model       string   `yaml:"model"`
-	SystemPrompt string  `yaml:"system_prompt"`
-	Permissions []string `yaml:"permissions,omitempty"`
+	Name         string   `yaml:"name"`
+	Model        string   `yaml:"model"`
+	SystemPrompt string   `yaml:"system_prompt"`
+	Permissions  []string `yaml:"permissions,omitempty"`
 }
 
 type CustomCommand struct {
@@ -137,6 +140,7 @@ func DefaultConfig() *Config {
 		Model:       "raczek",
 		Temperature: 0.7,
 		MaxTokens:   4096,
+		MaxTurns:    DefaultMaxTurns,
 		SessionDir:  filepath.Join(home, ".patcode", "sessions"),
 		Permissions: Permissions{
 			AutoApprove: []string{"read", "glob", "grep"},

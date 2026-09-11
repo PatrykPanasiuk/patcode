@@ -1,8 +1,8 @@
 package tui
 
 import (
-	_ "embed"
 	"context"
+	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -32,12 +32,12 @@ type model struct {
 	agent      *agent.Agent
 	provider   llm.Provider
 
-	messages    []chatMessage
-	textarea    textarea.Model
-	viewport    viewport.Model
-	spinner     spinner.Model
-	loading     bool
-	showHelp    bool
+	messages     []chatMessage
+	textarea     textarea.Model
+	viewport     viewport.Model
+	spinner      spinner.Model
+	loading      bool
+	showHelp     bool
 	showCommands bool
 
 	width  int
@@ -47,7 +47,7 @@ type model struct {
 
 	cancelFunc context.CancelFunc
 
-	providerType string
+	providerType  string
 	providerModel string
 	providerReady bool
 }
@@ -66,7 +66,7 @@ const asciiArt = `.xX:$:
       .;&&&&&$.  .;$:  .X;.   .:&&x.     .+&&&:    .:;$;+&&&&&:       .:;X&&&&;
           ..                                              ..`
 
-func initialModel(projectDir string, cfg *config.Config) (*model, error) {
+func initialModel(projectDir string, cfg *config.Config, sess *session.Session) (*model, error) {
 	absDir, err := config.ResolveProjectDir(projectDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolving project directory: %w", err)
@@ -78,7 +78,10 @@ func initialModel(projectDir string, cfg *config.Config) (*model, error) {
 		saveDir = filepath.Join(home, ".patcode", "sessions")
 	}
 
-	sess := session.New(absDir, saveDir)
+	if sess == nil {
+		sess = session.New(absDir, saveDir)
+	}
+	sess.Project = absDir
 
 	provider, err := llm.NewProvider(llm.ProviderConfig{
 		Type:      string(cfg.Provider),
@@ -92,7 +95,7 @@ func initialModel(projectDir string, cfg *config.Config) (*model, error) {
 	}
 
 	registry := tools.DefaultRegistry(absDir)
-	ag := agent.New(provider, registry, sess, cfg.Model)
+	ag := agent.New(provider, registry, sess, cfg.Model, cfg.MaxTurns)
 
 	ti := textarea.New()
 	ti.Placeholder = "message... (/? for help)"
@@ -331,7 +334,7 @@ shortcuts:
 
 	case "/session":
 		m.messages = append(m.messages, chatMessage{
-			Role:    "system",
+			Role: "system",
 			Content: fmt.Sprintf("Session ID: %s\nCreated: %s\nMessages: %d\nMode: %s",
 				m.session.ID,
 				m.session.CreatedAt.Format("2006-01-02 15:04:05"),

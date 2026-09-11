@@ -31,8 +31,8 @@ type Tool struct {
 }
 
 type Registry struct {
-	tools        map[string]Tool
-	currentMode  string
+	tools       map[string]Tool
+	currentMode string
 }
 
 func NewRegistry() *Registry {
@@ -80,6 +80,8 @@ func DefaultRegistry(workdir string) *Registry {
 	r.Register(EditTool(workdir))
 	r.Register(GrepTool(workdir))
 	r.Register(GlobTool(workdir))
+	r.Register(WebFetchTool(workdir))
+	r.Register(WebSearchTool(workdir))
 	return r
 }
 

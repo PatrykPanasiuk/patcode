@@ -21,8 +21,17 @@ func TestPolicyForMode_AllModes(t *testing.T) {
 
 func TestPolicyForMode_Unknown(t *testing.T) {
 	p := PolicyForMode("nonexistent")
-	if p.Mode != "ask" {
-		t.Errorf("expected fallback to ask, got %q", p.Mode)
+	if p.Mode != "nonexistent" {
+		t.Errorf("expected locked fallback policy with the original mode, got %q", p.Mode)
+	}
+}
+
+func TestPolicyForMode_UnknownAllDenied(t *testing.T) {
+	_ = PolicyForMode("nope")
+	for _, tool := range []string{"read", "write", "edit", "bash", "grep", "glob", "webfetch", "websearch"} {
+		if perm := IsToolAllowed("nope", tool); perm != PermissionDeny {
+			t.Errorf("unknown mode %s: expected deny, got %s", tool, perm)
+		}
 	}
 }
 
@@ -34,6 +43,15 @@ func TestIsToolAllowed_Ask(t *testing.T) {
 	perm = IsToolAllowed("ask", "write")
 	if perm != PermissionDeny {
 		t.Errorf("expected deny, got %s", perm)
+	}
+	// Web research is available in ask mode.
+	perm = IsToolAllowed("ask", "webfetch")
+	if perm != PermissionAuto {
+		t.Errorf("ask webfetch: expected auto, got %s", perm)
+	}
+	perm = IsToolAllowed("ask", "websearch")
+	if perm != PermissionAuto {
+		t.Errorf("ask websearch: expected auto, got %s", perm)
 	}
 }
 
@@ -104,18 +122,18 @@ func TestIsToolAllowed_Test(t *testing.T) {
 
 func TestAllowedToolNames_Ask(t *testing.T) {
 	names := AllowedToolNames("ask")
-	if len(names) != 0 {
-		t.Errorf("expected no tools for ask, got %v", names)
+	if len(names) != 2 {
+		t.Errorf("expected webfetch+websearch for ask, got %v", names)
 	}
 }
 
 func TestAllowedToolNames_Inspect(t *testing.T) {
 	names := AllowedToolNames("inspect")
-	if len(names) != 3 {
-		t.Errorf("expected 3 tools for inspect, got %d: %v", len(names), names)
+	if len(names) != 5 {
+		t.Errorf("expected 5 tools for inspect, got %d: %v", len(names), names)
 	}
 	for _, n := range names {
-		if n != "read" && n != "grep" && n != "glob" {
+		if n != "read" && n != "grep" && n != "glob" && n != "webfetch" && n != "websearch" {
 			t.Errorf("unexpected tool %q in inspect", n)
 		}
 	}
@@ -123,15 +141,15 @@ func TestAllowedToolNames_Inspect(t *testing.T) {
 
 func TestAllowedToolNames_Build(t *testing.T) {
 	names := AllowedToolNames("build")
-	if len(names) != 6 {
-		t.Errorf("expected 6 tools for build, got %d: %v", len(names), names)
+	if len(names) != 8 {
+		t.Errorf("expected 8 tools for build, got %d: %v", len(names), names)
 	}
 }
 
 func TestAllowedToolNames_Patch(t *testing.T) {
 	names := AllowedToolNames("patch")
-	if len(names) != 3 {
-		t.Errorf("expected 3 tools for patch (no write/edit/bash), got %d: %v", len(names), names)
+	if len(names) != 5 {
+		t.Errorf("expected 5 tools for patch (no write/edit/bash), got %d: %v", len(names), names)
 	}
 }
 

@@ -25,10 +25,10 @@ const (
 )
 
 type AgentEvent struct {
-	Type   EventType `json:"type"`
-	Content string   `json:"content,omitempty"`
-	Tool   string    `json:"tool,omitempty"`
-	Error  string    `json:"error,omitempty"`
+	Type    EventType `json:"type"`
+	Content string    `json:"content,omitempty"`
+	Tool    string    `json:"tool,omitempty"`
+	Error   string    `json:"error,omitempty"`
 }
 
 type Agent struct {
@@ -36,15 +36,22 @@ type Agent struct {
 	registry *tools.Registry
 	session  *session.Session
 	model    string
+	maxTurns int
 	mu       sync.Mutex
 }
 
-func New(provider llm.Provider, registry *tools.Registry, sess *session.Session, model string) *Agent {
+const defaultMaxTurns = 8
+
+func New(provider llm.Provider, registry *tools.Registry, sess *session.Session, model string, maxTurns int) *Agent {
+	if maxTurns < 1 {
+		maxTurns = defaultMaxTurns
+	}
 	return &Agent{
 		provider: provider,
 		registry: registry,
 		session:  sess,
 		model:    model,
+		maxTurns: maxTurns,
 	}
 }
 
@@ -73,10 +80,10 @@ func (a *Agent) Process(ctx context.Context, userMessage string, events chan<- A
 	}
 
 	msg := llm.ChatRequest{
-		Model:     a.model,
-		Messages:  a.session.GetMessages(),
-		System:    systemPrompt,
-		Stream:    true,
+		Model:    a.model,
+		Messages: a.session.GetMessages(),
+		System:   systemPrompt,
+		Stream:   true,
 	}
 
 	{
@@ -85,7 +92,7 @@ func (a *Agent) Process(ctx context.Context, userMessage string, events chan<- A
 		}
 	}
 
-	const maxTurns = 8
+	maxTurns := a.maxTurns
 	turnFinished := false
 
 	for turn := 0; turn < maxTurns && !turnFinished; turn++ {
@@ -169,37 +176,54 @@ func (a *Agent) Process(ctx context.Context, userMessage string, events chan<- A
 					continue
 				}
 
+				// Announce all tool calls in order first so the UI stays ordered.
 				for _, tc := range toolCalls {
 					events <- AgentEvent{
 						Type:    EventToolCall,
 						Tool:    tc.Function.Name,
 						Content: tc.Function.Arguments,
 					}
+				}
 
-					var args json.RawMessage
-					if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-						args = json.RawMessage(tc.Function.Arguments)
-					}
+				// Execute all tool calls in parallel; results are stored by
+				// index so session messages keep the original order.
+				type toolOutcome struct {
+					tc     llm.ToolCall
+					result *tools.ToolResult
+				}
+				outcomes := make([]toolOutcome, len(toolCalls))
+				var wg sync.WaitGroup
+				for i, tc := range toolCalls {
+					wg.Add(1)
+					go func(i int, tc llm.ToolCall) {
+						defer wg.Done()
+						var args json.RawMessage
+						if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+							args = json.RawMessage(tc.Function.Arguments)
+						}
+						// Tool execution failures are surfaced through the regular
+						// ToolResult path; cancelled calls stop early.
+						outcomes[i] = toolOutcome{tc: tc, result: a.registry.Execute(ctx, tc.Function.Name, args)}
+					}(i, tc)
+				}
+				wg.Wait()
 
-					result := a.registry.Execute(ctx, tc.Function.Name, args)
-
-					var resultContent string
-					if result.Success {
-						resultContent = result.Data
-					} else {
-						resultContent = fmt.Sprintf("Error: %s", result.Error)
+				for _, out := range outcomes {
+					resultContent := out.result.Data
+					if !out.result.Success {
+						resultContent = fmt.Sprintf("Error: %s", out.result.Error)
 					}
 
 					a.session.AddMessage(llm.Message{
 						Role:       llm.RoleTool,
 						Content:    resultContent,
-						ToolCallID: tc.ID,
-						Name:       tc.Function.Name,
+						ToolCallID: out.tc.ID,
+						Name:       out.tc.Function.Name,
 					})
 
 					events <- AgentEvent{
 						Type:    EventToolResult,
-						Tool:    tc.Function.Name,
+						Tool:    out.tc.Function.Name,
 						Content: resultContent,
 					}
 				}
@@ -217,10 +241,10 @@ func (a *Agent) Process(ctx context.Context, userMessage string, events chan<- A
 
 		// Build the next request from the accumulated conversation.
 		msg = llm.ChatRequest{
-			Model:     a.model,
-			Messages:  a.session.GetMessages(),
-			System:    systemPrompt,
-			Stream:    true,
+			Model:    a.model,
+			Messages: a.session.GetMessages(),
+			System:   systemPrompt,
+			Stream:   true,
 		}
 		if mode != "shell" {
 			msg.Tools = a.registry.DefinitionsForMode(mode)

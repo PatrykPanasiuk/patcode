@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 )
 
 type ReadArgs struct {
@@ -46,9 +45,9 @@ func ReadTool(workdir string) Tool {
 				}
 			}
 
-			filePath := readArgs.FilePath
-			if !filepath.IsAbs(filePath) {
-				filePath = filepath.Join(workdir, filePath)
+			filePath, err := confinePath(workdir, readArgs.FilePath)
+			if err != nil {
+				return &ToolResult{Success: false, Error: err.Error()}
 			}
 
 			data, err := os.ReadFile(filePath)

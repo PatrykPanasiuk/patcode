@@ -2,7 +2,7 @@
 
 PatCode is an early-stage terminal coding agent for inspecting, planning and modifying codebases from the command line.
 
-It runs locally in your terminal, connects to LLM providers (OpenAI-compatible, Anthropic, Ollama, local), and exposes file and shell tools to the model through configurable modes.
+It runs locally in your terminal, connects to LLM providers (OpenAI-compatible, Anthropic, Ollama, local), and exposes file, shell, and web tools to the model through configurable modes.
 
 ## Status
 
@@ -13,36 +13,46 @@ It runs locally in your terminal, connects to LLM providers (OpenAI-compatible, 
 | TUI (Bubble Tea) | implemented |
 | Headless `run` command | implemented |
 | 13 agent modes with policy engine | implemented |
+| Web tools (`webfetch`, `websearch`) | implemented |
+| Parallel tool-call execution | implemented |
+| Configurable max turns | implemented (`max_turns`, default 8) |
+| Streaming tool-call aggregation (OpenAI + Anthropic) | implemented |
 | OpenAI-compatible provider | implemented |
 | Anthropic provider | implemented |
 | Ollama provider | implemented |
+| OpenRouter provider | implemented |
 | Builtin provider | implemented |
+| Local GGUF provider (llama-server) | implemented — requires a llama-server binary or URL |
 | File and shell tools | implemented |
+| Path confinement + symlink protection | implemented for file/search tools |
+| Safe argv-based bash (no `bash -c`) | implemented |
 | Session persistence | implemented |
+| Session list / show / restore / delete | implemented |
 | Custom commands from config | implemented |
 | RAG memory bridge | experimental, requires external setup |
-| Local GGUF provider | stub — no inference backend wired |
-| Multi-step agent loop | partial — single tool-call round |
-| Bash allow/deny-list and test-only policy | implemented |
 | Approval gates | partial — return error in headless mode |
-| Streaming tool-call aggregation | basic — may lose partial tool-call frames |
-| Release binaries | not yet available |
+| OS-level sandboxing | not yet — policy engine + path confinement are advisory boundaries |
 
 ## Features
 
 - Terminal TUI built with [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 - Headless CLI via `patcode run`
 - 13 agent modes with a policy engine controlling tool access per mode
-- Provider abstraction with OpenAI-compatible, Anthropic, Ollama, local, and builtin backends
-- Tool set: read, write, edit, grep, glob, bash
-- Bash command allowlist/denylist and test-only policy in `test` and `ci` modes
-- Session persistence (JSON) for conversation history
+- Web research: `webfetch` (docs, API references, any URL) and `websearch` (DuckDuckGo, or Brave via `SEARCH_API_KEY`)
+- Parallel tool-call execution inside a turn, ordered results
+- Configurable `max_turns` per message
+- Provider abstraction with OpenAI-compatible, Anthropic, Ollama, OpenRouter, local (llama.cpp), and builtin backends
+- Tool set: read, write, edit, grep, glob, bash, webfetch, websearch
+- Bash command allowlist/denylist, test-only policy, and argv-based execution (no shell injection surface)
+- Path confinement: file and search tools cannot escape the project root, even through symlinks
+- Session persistence (JSON), including `session list|show|restore|delete`
 - Custom command templates from `patcode.yaml`
 - Optional RAG context bridge via Python/Postgres (experimental)
+- Automatic update detection on startup (cached daily check) + `patcode update`
 
 ## Installation
 
-Requires Go 1.21+.
+Requires Go 1.23+.
 
 ```bash
 git clone https://github.com/PatrykPanasiuk/patcode.git
@@ -56,10 +66,10 @@ go build -o patcode .
 # Interactive TUI
 ./patcode .
 
-# Headless: ask about a project
-./patcode run -p . --mode ask "Explain this project"
+# Headless: ask about a project (web research available in ask mode)
+./patcode run -p . --mode ask "What is the current LTS version of Next.js?"
 
-# Headless: inspect the codebase (read-only, search tools only)
+# Headless: inspect the codebase (read-only, search + web tools)
 ./patcode run -p . --mode inspect "Show me the directory structure"
 
 # Headless: plan a refactor (read + write investigations, no edits)
@@ -78,22 +88,24 @@ go build -o patcode .
 ./patcode run -p . --mode shell "go test ./..."
 ```
 
+Web tools are available in every mode except `shell`, including `ask`, so headless research works out of the box.
+
 ## Modes
 
 | Mode | Tool Access | Use Case |
 |---|---|---|
-| ask | none (LLM-only) | Knowledge questions, architectural discussions |
-| inspect | read, grep, glob | Codebase exploration, understanding structure |
-| plan | read, grep, glob | Research and planning, producing design docs |
-| review | read, grep, glob, write, edit | Code review with suggested edits |
-| audit | read, grep, glob | Security/quality audit — no modifications |
-| patch | read, grep, glob | Generating patch files or diffs (no write/edit) |
-| build | read, grep, glob, write, edit, bash | Implementing features and fixes (approval required for writes/edits/shell) |
-| fix | read, grep, glob, write, edit | Bug fixing (approval required for writes/edits) |
-| refactor | read, grep, glob, write, edit | Code restructuring with write access (approval required) |
-| scaffold | read, grep, glob, write, edit | Project scaffolding — create new files |
-| test | read, grep, glob, bash (test-only) | Writing and running tests |
-| ci | read, grep, glob, bash (test-only) | CI pipeline execution |
+| ask | webfetch, websearch (LLM-only otherwise) | Knowledge questions, web research |
+| inspect | read, grep, glob + web | Codebase exploration, understanding structure |
+| plan | read, grep, glob + web | Research and planning, producing design docs |
+| review | read, grep, glob, write, edit + web | Code review with suggested edits |
+| audit | read, grep, glob + web | Security/quality audit — no modifications |
+| patch | read, grep, glob + web | Generating patch files or diffs (no write/edit) |
+| build | read, grep, glob, write, edit, bash + web | Implementing features and fixes (approval required for writes/edits/shell) |
+| fix | read, grep, glob, write, edit + web | Bug fixing (approval required for writes/edits) |
+| refactor | read, grep, glob, write, edit + web | Code restructuring with write access (approval required) |
+| scaffold | read, grep, glob, write, edit + web | Project scaffolding — create new files |
+| test | read, grep, glob, bash (test-only) + web | Writing and running tests |
+| ci | read, grep, glob, bash (test-only) + web | CI pipeline execution |
 | shell | direct passthrough | Arbitrary shell commands, no LLM invocation |
 
 **Policy levels:**
@@ -110,10 +122,12 @@ go build -o patcode .
 Place `patcode.yaml` in your project root:
 
 ```yaml
-provider: ollama
-model: llama3
+provider: openrouter
+model: openai/gpt-4o-mini
+base_url: https://openrouter.ai/api/v1
 temperature: 0.7
 max_tokens: 4096
+max_turns: 8
 
 permissions:
   auto_approve:
@@ -122,7 +136,11 @@ permissions:
     - grep
 ```
 
-The permissions block describes intended auto-approval policy. Tool enforcement is now wired through the permissions package, which checks each tool call against the current mode's policy (`auto`, `ask`, `deny`, `limited`). Bash commands are additionally validated against a global denylist and mode-specific allowlist. The system is **advisory** — there is no OS-level sandboxing.
+`max_turns` controls how many tool-call rounds the agent can run per message (default 8).
+
+The permissions block describes intended auto-approval policy. Tool enforcement is wired through the permissions package, which checks each tool call against the current mode's policy (`auto`, `ask`, `deny`, `limited`). Bash commands are additionally validated against a global denylist and mode-specific allowlist.
+
+File and search tools (`read`, `write`, `edit`, `grep`, `glob`) are hard-confined to the project root: any path that resolves outside the root — including through symlinks — is rejected. The policy engine itself remains advisory, not an OS sandbox.
 
 ### Custom commands
 
@@ -136,6 +154,17 @@ commands:
 Usage: `/review main.go` expands `{0}` to `main.go`.
 
 ## Providers
+
+### OpenRouter (recommended for remote models)
+
+```yaml
+provider: openrouter
+api_key: sk-or-v1-...
+model: openai/gpt-4o-mini
+base_url: https://openrouter.ai/api/v1
+```
+
+Prefer supplying the key via the environment (`OPENROUTER_API_KEY`) — see [Security](#security).
 
 ### Ollama
 
@@ -164,29 +193,30 @@ api_key: sk-ant-...
 model: claude-sonnet-4-20250514
 ```
 
-Uses the Anthropic Messages API with tool-use blocks.
+Uses the Anthropic Messages API with tool-use blocks, including streaming `input_json_delta` aggregation.
 
-### OpenRouter
+### Local (llama.cpp GGUF)
+
+The `local` provider runs real GGUF inference by delegating to a llama.cpp `llama-server` HTTP endpoint. Two ways to use it:
+
+1. **Attach to a running server** (no auto-start):
 
 ```yaml
-provider: openrouter
-api_key: sk-or-v1-...
-model: openai/gpt-4o-mini
-base_url: https://openrouter.ai/api/v1
+provider: local
+model_path: /path/to/model.gguf
+base_url: http://127.0.0.1:8080/v1
 ```
 
-Uses the OpenAI-compatible endpoint. Prefer supplying the key via the
-environment (`OPENROUTER_API_KEY` or `PATCODE_API_KEY`) instead of a file —
-see [Security](#security).
+You can also set `PATCODE_LLAMA_SERVER_URL` instead of `base_url`.
 
-### Local (experimental)
+2. **Auto-start** from a `llama-server` binary on your PATH:
 
 ```yaml
 provider: local
 model_path: /path/to/model.gguf
 ```
 
-The `local` provider is a **stub**. It echoes the prompt back word-by-word as a placeholder. No GGUF inference is wired — CGO bindings (e.g. `go-llama.cpp`) would need to be integrated.
+Environment knobs: `PATCODE_LLAMA_BIN` (binary path, default `llama-server`), `PATCODE_LLAMA_PORT` (default 8080), `PATCODE_LLAMA_CTX`, `PATCODE_LLAMA_THREADS`, `PATCODE_LLAMA_GPU_LAYERS`. The provider waits up to 120s for the server to become healthy. Install llama.cpp from https://github.com/ggml-org/llama.cpp.
 
 ### Builtin
 
@@ -202,16 +232,27 @@ Available to the model depending on the active mode's policy:
 
 | Tool | Description | Risk |
 |---|---|---|
-| read | Read file contents with optional offset/limit | low |
-| grep | Search file contents with regex | low |
-| glob | Find files matching glob patterns | low |
-| write | Create or overwrite files | medium/high |
-| edit | Perform exact string replacement in files | medium/high |
-| bash | Execute shell commands with timeout | high |
+| read | Read file contents with optional offset/limit (confined) | low |
+| grep | Search file contents with regex (confined) | low |
+| glob | Find files matching glob patterns (confined) | low |
+| webfetch | Fetch a URL and return markdown/text | low |
+| websearch | Search the web and return result titles/URLs/snippets | low |
+| write | Create or overwrite files (confined) | medium/high |
+| edit | Perform exact string replacement in files (confined) | medium/high |
+| bash | Execute commands as argv with timeout (denylisted, allowlisted per mode) | high |
+
+`webfetch` follows redirects, caps responses at 2MB, and converts HTML to markdown (title + headings + links + code). `websearch` uses DuckDuckGo by default; set `SEARCH_API_KEY` (Brave Search) for a keyed backend.
 
 ## Security model
 
-PatCode can read files, write files, and execute shell commands depending on the active mode and tool access.
+PatCode can read files, write files, execute shell commands, and access the web depending on the active mode and tool access.
+
+### Command execution safety
+
+- The model-facing `bash` tool runs commands **as argv** (quoting is supported, no shell). Shell metacharacters (`|`, `&`, `;`, `<`, `>`, `$`, `` ` ``, `(`, `)`) are rejected.
+- Set `PATCODE_BASH_SHELL=1` to explicitly opt back into classic `bash -c` passthrough (re-enables the injection surface).
+- Commands are validated against a global denylist (`rm`, `sudo`, `curl`, `wget`, `ssh`, `scp`, `chmod`, `chown`, `dd`, `kubectl`, cloud CLIs, etc.) and mode allowlists (e.g. test-only in `test`/`ci`).
+- Path-scoped confinement: `read`, `write`, `edit`, `grep`, and `glob` cannot touch anything outside the project root, including via symlinks. This is a hard check in code, not just policy.
 
 ### Secrets handling
 
@@ -225,10 +266,7 @@ PatCode can read files, write files, and execute shell commands depending on the
 - Do **not** run it with elevated privileges (root, sudo).
 - Do **not** use it on directories containing secrets (`.env`, `id_rsa`, `~/.aws`, `~/.config/gh`) unless you fully understand the risk.
 - Treat model output and tool calls as **untrusted**. The model may generate paths, commands, or content you did not intend to execute.
-- A policy engine enforces per-mode tool access (auto/ask/deny/limited) for every tool call at runtime.
-- Bash commands are validated against a global denylist (rm, sudo, curl, wget, ssh, scp, chmod, chown, dd, kubectl, docker) and mode-specific allowlists (e.g. test-only in `test` and `ci` modes).
-- There is **no OS-level sandboxing** — the policy engine is advisory, not a security boundary.
-- Symlink protection, path-scoped confinement, and interactive approval gates are **not yet implemented**.
+- The policy engine and path confinement are **not a full OS sandbox** — there is no seccomp/Landlock boundary yet.
 
 ## Architecture
 
@@ -242,8 +280,19 @@ patcode/
   permissions/  tool-level policy engine and bash command validation
   ragbridge/  optional local RAG context bridge
   session/    session state, mode definitions, persistence (JSON)
-  tools/      file, shell, and search tools with runtime policy enforcement
+  tools/      file, shell, search, and web tools with policy + confinement
   tui/        Bubble Tea terminal UI
+```
+
+## Sessions
+
+Sessions are stored as JSON in `~/.patcode/sessions` (or `session_dir`):
+
+```bash
+patcode session list            # id, mode, message count, project
+patcode session show <id>       # details
+patcode session restore <id>    # resume a session in the TUI
+patcode session delete <id>
 ```
 
 ## RAG memory bridge
@@ -264,26 +313,29 @@ go vet ./...
 go build ./...
 ```
 
+CI runs `go vet`, `go test -race -cover`, and `govulncheck` on every push/PR (`.github/workflows/ci.yml`). Tag `v*` to build release binaries via goreleaser (`.github/workflows/release.yml`, `.goreleaser.yaml`).
+
+## Updates
+
+- `patcode version` prints the current version (`v0.1.0` unless overridden at build time via `-ldflags "-X patcode/version.Version=vX.Y.Z"`).
+- On startup patcode checks GitHub for a newer release. The result is cached in `~/.patcode/update_check.json` (one network check per 24h), so startup stays fast and offline runs print nothing. When a newer release exists it shows a one-line notice with the `patcode update` hint.
+- `patcode update` checks GitHub explicitly (add `--force` to reinstall the current version) and downloads the release binary for your OS/arch, falling back to building from source when no matching asset exists.
+
 ## Limitations
 
 - **Early-stage MVP** — the project is functional but young.
-- **Policy engine is advisory** — per-mode tool access and bash allowlist/denylist are enforced in Go code, not at the OS level.
-- **Local provider is a stub** — no real GGUF inference is wired.
-- **Streaming tool-call handling is basic** — partial frames from the LLM may be lost.
-- **No release binaries** — you must build from source.
-- **Limited test coverage** and no CI pipeline.
+- **No full OS sandbox** — policy engine and path confinement are enforced in Go code, not via seccomp/Landlock.
+- **Approval gates are partial** — `ask`-level tools return an error in headless mode instead of prompting.
+- **Streaming edge cases** — rare provider-specific stream formats may still be dropped; throttled/retried frames are not resynced.
 
 ## Roadmap
 
-- OS-level sandboxing and path-scoped confinement
 - Interactive approval UI for ask-level tools
-- Multi-step agent loop (multiple tool-call rounds per turn)
-- Robust streaming tool-call aggregation with retry
-- CI with tests, vet, and govulncheck
-- Pre-built release binaries (GitHub Releases)
-- Improved session management (list, restore, delete)
-- Safer shell execution (no `-c` passthrough, arg-based commands)
-- Better documentation and examples
+- OS-level sandboxing (Landlock/seccomp) for bash
+- MCP server / plugin / skills system
+- Safer `shell` mode passthrough (argv-based)
+- Session export/import and search
+- More provider coverage and streaming robustness
 
 ## License
 

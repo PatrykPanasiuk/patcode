@@ -28,12 +28,14 @@ type ModePolicy struct {
 	Mode        string
 	Description string
 
-	Read  ToolPermission
-	Grep  ToolPermission
-	Glob  ToolPermission
-	Write ToolPermission
-	Edit  ToolPermission
-	Bash  ToolPermission
+	Read      ToolPermission
+	Grep      ToolPermission
+	Glob      ToolPermission
+	Write     ToolPermission
+	Edit      ToolPermission
+	Bash      ToolPermission
+	WebFetch  ToolPermission
+	WebSearch ToolPermission
 
 	BashPolicy     BashPolicyKind
 	CanModifyFiles bool
@@ -43,90 +45,113 @@ type ModePolicy struct {
 
 var modePolicies = map[string]ModePolicy{
 	"ask": {
-		Mode: "ask", Description: "General answers without tools",
+		Mode: "ask", Description: "General answers with optional web research",
 		Read: PermissionDeny, Grep: PermissionDeny, Glob: PermissionDeny,
 		Write: PermissionDeny, Edit: PermissionDeny, Bash: PermissionDeny,
+		WebFetch: PermissionAuto, WebSearch: PermissionAuto,
 		BashPolicy: BashDeny, CanModifyFiles: false, IsReadOnly: true, IsHeadlessSafe: true,
 	},
 	"inspect": {
 		Mode: "inspect", Description: "Read-only repository inspection",
 		Read: PermissionAuto, Grep: PermissionAuto, Glob: PermissionAuto,
 		Write: PermissionDeny, Edit: PermissionDeny, Bash: PermissionDeny,
+		WebFetch: PermissionAuto, WebSearch: PermissionAuto,
 		BashPolicy: BashDeny, CanModifyFiles: false, IsReadOnly: true, IsHeadlessSafe: true,
 	},
 	"plan": {
 		Mode: "plan", Description: "Implementation planning",
 		Read: PermissionAuto, Grep: PermissionAuto, Glob: PermissionAuto,
 		Write: PermissionDeny, Edit: PermissionDeny, Bash: PermissionDeny,
+		WebFetch: PermissionAuto, WebSearch: PermissionAuto,
 		BashPolicy: BashDeny, CanModifyFiles: false, IsReadOnly: true, IsHeadlessSafe: true,
 	},
 	"review": {
 		Mode: "review", Description: "Code/diff review",
 		Read: PermissionAuto, Grep: PermissionAuto, Glob: PermissionAuto,
 		Write: PermissionDeny, Edit: PermissionDeny, Bash: PermissionLimited,
+		WebFetch: PermissionAuto, WebSearch: PermissionAuto,
 		BashPolicy: BashLimited, CanModifyFiles: false, IsReadOnly: true, IsHeadlessSafe: true,
 	},
 	"audit": {
 		Mode: "audit", Description: "Security-focused review",
 		Read: PermissionAuto, Grep: PermissionAuto, Glob: PermissionAuto,
 		Write: PermissionDeny, Edit: PermissionDeny, Bash: PermissionLimited,
+		WebFetch: PermissionAuto, WebSearch: PermissionAuto,
 		BashPolicy: BashLimited, CanModifyFiles: false, IsReadOnly: true, IsHeadlessSafe: true,
 	},
 	"patch": {
 		Mode: "patch", Description: "Generate patch/diff without applying",
 		Read: PermissionAuto, Grep: PermissionAuto, Glob: PermissionAuto,
 		Write: PermissionDeny, Edit: PermissionDeny, Bash: PermissionDeny,
+		WebFetch: PermissionAuto, WebSearch: PermissionAuto,
 		BashPolicy: BashDeny, CanModifyFiles: false, IsReadOnly: true, IsHeadlessSafe: true,
 	},
 	"build": {
 		Mode: "build", Description: "Implement changes with approval gates",
 		Read: PermissionAuto, Grep: PermissionAuto, Glob: PermissionAuto,
 		Write: PermissionAsk, Edit: PermissionAsk, Bash: PermissionAsk,
+		WebFetch: PermissionAuto, WebSearch: PermissionAuto,
 		BashPolicy: BashAsk, CanModifyFiles: true, IsReadOnly: false, IsHeadlessSafe: false,
 	},
 	"fix": {
 		Mode: "fix", Description: "Fix failing tests/errors",
 		Read: PermissionAuto, Grep: PermissionAuto, Glob: PermissionAuto,
 		Write: PermissionAsk, Edit: PermissionAsk, Bash: PermissionLimited,
+		WebFetch: PermissionAuto, WebSearch: PermissionAuto,
 		BashPolicy: BashTestOnly, CanModifyFiles: true, IsReadOnly: false, IsHeadlessSafe: false,
 	},
 	"refactor": {
 		Mode: "refactor", Description: "Behavior-preserving changes",
 		Read: PermissionAuto, Grep: PermissionAuto, Glob: PermissionAuto,
 		Write: PermissionAsk, Edit: PermissionAsk, Bash: PermissionLimited,
+		WebFetch: PermissionAuto, WebSearch: PermissionAuto,
 		BashPolicy: BashTestOnly, CanModifyFiles: true, IsReadOnly: false, IsHeadlessSafe: false,
 	},
 	"scaffold": {
 		Mode: "scaffold", Description: "Create initial structure",
 		Read: PermissionAuto, Grep: PermissionAuto, Glob: PermissionAuto,
 		Write: PermissionAsk, Edit: PermissionAsk, Bash: PermissionDeny,
+		WebFetch: PermissionAuto, WebSearch: PermissionAuto,
 		BashPolicy: BashDeny, CanModifyFiles: true, IsReadOnly: false, IsHeadlessSafe: false,
 	},
 	"test": {
 		Mode: "test", Description: "Run and explain tests/lints",
 		Read: PermissionAuto, Grep: PermissionAuto, Glob: PermissionAuto,
 		Write: PermissionDeny, Edit: PermissionDeny, Bash: PermissionLimited,
+		WebFetch: PermissionAuto, WebSearch: PermissionAuto,
 		BashPolicy: BashTestOnly, CanModifyFiles: false, IsReadOnly: true, IsHeadlessSafe: true,
 	},
 	"ci": {
 		Mode: "ci", Description: "Automation-friendly review/checks",
 		Read: PermissionAuto, Grep: PermissionAuto, Glob: PermissionAuto,
 		Write: PermissionDeny, Edit: PermissionDeny, Bash: PermissionLimited,
+		WebFetch: PermissionAuto, WebSearch: PermissionAuto,
 		BashPolicy: BashTestOnly, CanModifyFiles: false, IsReadOnly: true, IsHeadlessSafe: true,
 	},
 	"shell": {
 		Mode: "shell", Description: "Direct shell passthrough, no LLM",
 		Read: PermissionDeny, Grep: PermissionDeny, Glob: PermissionDeny,
 		Write: PermissionDeny, Edit: PermissionDeny, Bash: PermissionDeny,
+		WebFetch: PermissionDeny, WebSearch: PermissionDeny,
 		BashPolicy: BashDirect, CanModifyFiles: false, IsReadOnly: false, IsHeadlessSafe: false,
 	},
+}
+
+var lockedPolicy = ModePolicy{
+	Mode: "unknown", Description: "Unknown mode — all tools denied",
+	Read: PermissionDeny, Grep: PermissionDeny, Glob: PermissionDeny,
+	Write: PermissionDeny, Edit: PermissionDeny, Bash: PermissionDeny,
+	WebFetch: PermissionDeny, WebSearch: PermissionDeny,
+	BashPolicy: BashDeny, CanModifyFiles: false, IsReadOnly: true, IsHeadlessSafe: true,
 }
 
 func PolicyForMode(mode string) ModePolicy {
 	if p, ok := modePolicies[mode]; ok {
 		return p
 	}
-	return modePolicies["ask"]
+	locked := lockedPolicy
+	locked.Mode = mode
+	return locked
 }
 
 func ToolsAllowedForMode(mode string) map[string]ToolPermission {
@@ -134,6 +159,7 @@ func ToolsAllowedForMode(mode string) map[string]ToolPermission {
 	return map[string]ToolPermission{
 		"read": p.Read, "grep": p.Grep, "glob": p.Glob,
 		"write": p.Write, "edit": p.Edit, "bash": p.Bash,
+		"webfetch": p.WebFetch, "websearch": p.WebSearch,
 	}
 }
 
@@ -156,6 +182,7 @@ func AllowedToolNames(mode string) []string {
 	for name, perm := range map[string]ToolPermission{
 		"read": p.Read, "grep": p.Grep, "glob": p.Glob,
 		"write": p.Write, "edit": p.Edit, "bash": p.Bash,
+		"webfetch": p.WebFetch, "websearch": p.WebSearch,
 	} {
 		if perm != PermissionDeny {
 			names = append(names, name)

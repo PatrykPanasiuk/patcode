@@ -46,13 +46,13 @@ type Provider interface {
 }
 
 type ChatRequest struct {
-	Model       string           `json:"model"`
-	Messages    []Message        `json:"messages"`
-	System      string           `json:"system,omitempty"`
+	Model       string                 `json:"model"`
+	Messages    []Message              `json:"messages"`
+	System      string                 `json:"system,omitempty"`
 	Tools       []tools.ToolDefinition `json:"tools,omitempty"`
-	Temperature float64          `json:"temperature"`
-	MaxTokens   int              `json:"max_tokens"`
-	Stream      bool             `json:"stream"`
+	Temperature float64                `json:"temperature"`
+	MaxTokens   int                    `json:"max_tokens"`
+	Stream      bool                   `json:"stream"`
 }
 
 type ChatResponse struct {
@@ -66,11 +66,11 @@ type Usage struct {
 }
 
 type StreamEvent struct {
-	Type    StreamEventType `json:"type"`
-	Content string          `json:"content,omitempty"`
-	ToolCall *ToolCall      `json:"tool_call,omitempty"`
-	Done    bool            `json:"done,omitempty"`
-	Error   error           `json:"error,omitempty"`
+	Type     StreamEventType `json:"type"`
+	Content  string          `json:"content,omitempty"`
+	ToolCall *ToolCall       `json:"tool_call,omitempty"`
+	Done     bool            `json:"done,omitempty"`
+	Error    error           `json:"error,omitempty"`
 }
 
 type StreamEventType string
@@ -124,7 +124,7 @@ func NewProvider(cfg ProviderConfig) (Provider, error) {
 		}
 		return p, nil
 	case "local":
-		return NewLocalProvider(cfg.ModelPath)
+		return NewLocalProvider(cfg.ModelPath, WithServerURL(cfg.BaseURL))
 	case "builtin":
 		return NewBuiltinProvider(), nil
 	default:
@@ -179,12 +179,12 @@ func NewOpenAIProvider(apiKey, baseURL string) *OpenAIProvider {
 }
 
 type openaiChatRequest struct {
-	Model       string        `json:"model"`
+	Model       string          `json:"model"`
 	Messages    []openaiMessage `json:"messages"`
-	Tools       []openaiTool  `json:"tools,omitempty"`
-	Temperature float64       `json:"temperature"`
-	MaxTokens   int           `json:"max_tokens"`
-	Stream      bool          `json:"stream"`
+	Tools       []openaiTool    `json:"tools,omitempty"`
+	Temperature float64         `json:"temperature"`
+	MaxTokens   int             `json:"max_tokens"`
+	Stream      bool            `json:"stream"`
 }
 
 // openaiTool is the OpenAI-compatible tool definition format:
@@ -194,7 +194,7 @@ type openaiChatRequest struct {
 // The project's ToolDefinition uses the Anthropic "input_schema" shape, so
 // tools must be converted to this format before being sent to OpenAI endpoints.
 type openaiTool struct {
-	Type     string           `json:"type"`
+	Type     string             `json:"type"`
 	Function openaiToolFunction `json:"function"`
 }
 
@@ -226,18 +226,18 @@ func toOpenAITools(defs []tools.ToolDefinition) []openaiTool {
 }
 
 type openaiMessage struct {
-	Role       string      `json:"role"`
-	Content    string      `json:"content,omitempty"`
-	ToolCallID string      `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`
-	Name       string      `json:"name,omitempty"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	Name       string     `json:"name,omitempty"`
 }
 
 type openaiChatResponse struct {
 	Choices []struct {
-		Index   int           `json:"index"`
-		Message openaiMessage `json:"message"`
-		FinishReason string  `json:"finish_reason"`
+		Index        int           `json:"index"`
+		Message      openaiMessage `json:"message"`
+		FinishReason string        `json:"finish_reason"`
 	} `json:"choices"`
 	Usage struct {
 		PromptTokens     int `json:"prompt_tokens"`
@@ -465,13 +465,13 @@ type anthropicContentBlock struct {
 }
 
 type anthropicRequest struct {
-	Model       string                    `json:"model"`
-	Messages    []anthropicMessage        `json:"messages"`
-	System      string                    `json:"system,omitempty"`
-	MaxTokens   int                       `json:"max_tokens"`
-	Temperature float64                   `json:"temperature"`
-	Tools       []tools.ToolDefinition    `json:"tools,omitempty"`
-	Stream      bool                      `json:"stream"`
+	Model       string                 `json:"model"`
+	Messages    []anthropicMessage     `json:"messages"`
+	System      string                 `json:"system,omitempty"`
+	MaxTokens   int                    `json:"max_tokens"`
+	Temperature float64                `json:"temperature"`
+	Tools       []tools.ToolDefinition `json:"tools,omitempty"`
+	Stream      bool                   `json:"stream"`
 }
 
 type anthropicResponse struct {
@@ -487,15 +487,16 @@ type anthropicResponse struct {
 }
 
 type anthropicStreamChunk struct {
-	Type  string                `json:"type"`
-	Index int                   `json:"index,omitempty"`
-	Delta *anthropicStreamDelta `json:"delta,omitempty"`
+	Type         string                 `json:"type"`
+	Index        int                    `json:"index,omitempty"`
+	Delta        *anthropicStreamDelta  `json:"delta,omitempty"`
 	ContentBlock *anthropicContentBlock `json:"content_block,omitempty"`
 }
 
 type anthropicStreamDelta struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type        string `json:"type"`
+	Text        string `json:"text,omitempty"`
+	PartialJSON string `json:"partial_json,omitempty"`
 }
 
 func toAnthropicMessages(msgs []Message) []anthropicMessage {
@@ -506,8 +507,8 @@ func toAnthropicMessages(msgs []Message) []anthropicMessage {
 			result = append(result, anthropicMessage{
 				Role: "user",
 				Content: []anthropicContentBlock{{
-					Type:   "tool_result",
-					ID:     m.ToolCallID,
+					Type:    "tool_result",
+					ID:      m.ToolCallID,
 					Content: m.Content,
 				}},
 			})
@@ -644,6 +645,21 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 		defer resp.Body.Close()
 		defer close(ch)
 
+		// Anthropic streams tool-use arguments incrementally as
+		// input_json_delta deltas. Accumulate them per content block and
+		// emit one complete ToolCall per block so parallel tool calls never
+		// collide and partial frames cannot corrupt the merged arguments.
+		toolCalls := map[int]*ToolCall{}
+		var toolOrder []int
+		flushToolCalls := func() {
+			for _, idx := range toolOrder {
+				if tc := toolCalls[idx]; tc != nil {
+					ch <- StreamEvent{Type: StreamToolCall, ToolCall: tc}
+				}
+			}
+			toolCalls = map[int]*ToolCall{}
+		}
+
 		scanner := NewSSEScanner(resp.Body)
 		for scanner.Scan() {
 			event := scanner.Event()
@@ -658,28 +674,43 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 
 			switch chunk.Type {
 			case "content_block_delta":
-				if chunk.Delta != nil && chunk.Delta.Text != "" {
-					ch <- StreamEvent{
-						Type:    StreamChunk,
-						Content: chunk.Delta.Text,
+				if chunk.Delta == nil {
+					continue
+				}
+				switch chunk.Delta.Type {
+				case "input_json_delta":
+					if chunk.Delta.PartialJSON == "" {
+						continue
+					}
+					tc, ok := toolCalls[chunk.Index]
+					if !ok {
+						continue
+					}
+					tc.Function.Arguments += chunk.Delta.PartialJSON
+				case "text_delta", "":
+					if chunk.Delta.Text != "" {
+						ch <- StreamEvent{
+							Type:    StreamChunk,
+							Content: chunk.Delta.Text,
+						}
 					}
 				}
 			case "content_block_start":
 				if chunk.ContentBlock != nil && chunk.ContentBlock.Type == "tool_use" {
-					inputJSON, _ := json.Marshal(chunk.ContentBlock.Input)
-					ch <- StreamEvent{
-						Type: StreamToolCall,
-						ToolCall: &ToolCall{
-							ID:   chunk.ContentBlock.ID,
-							Type: "function",
-							Function: ToolCallFunction{
-								Name:      chunk.ContentBlock.Name,
-								Arguments: string(inputJSON),
-							},
+					tc := &ToolCall{
+						ID:   chunk.ContentBlock.ID,
+						Type: "function",
+						Function: ToolCallFunction{
+							Name: chunk.ContentBlock.Name,
 						},
 					}
+					if _, exists := toolCalls[chunk.Index]; !exists {
+						toolOrder = append(toolOrder, chunk.Index)
+					}
+					toolCalls[chunk.Index] = tc
 				}
-			case "message_stop":
+			case "message_stop", "message_delta":
+				flushToolCalls()
 				ch <- StreamEvent{Type: StreamDone, Done: true}
 				return
 			case "error":
@@ -691,6 +722,7 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 		if err := scanner.Err(); err != nil {
 			ch <- StreamEvent{Type: StreamError, Error: err}
 		} else {
+			flushToolCalls()
 			ch <- StreamEvent{Type: StreamDone, Done: true}
 		}
 	}()

@@ -127,23 +127,35 @@ func TestNewProviderAnthropic(t *testing.T) {
 }
 
 func TestNewProviderLocal(t *testing.T) {
-	_, err := NewProvider(ProviderConfig{
+	// With a server URL set, the local provider attaches to it instead of
+	// attempting to spawn llama-server.
+	t.Setenv("PATCODE_LLAMA_SERVER_URL", "http://127.0.0.1:19999/v1")
+	p, err := NewProvider(ProviderConfig{
 		Type:      "local",
 		ModelPath: "/tmp/test.gguf",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	lp, ok := p.(*LocalProvider)
+	if !ok {
+		t.Fatalf("expected *LocalProvider, got %T", p)
+	}
+	if lp.ServerURL() != "http://127.0.0.1:19999/v1" {
+		t.Errorf("unexpected server url: %s", lp.ServerURL())
+	}
 }
 
 func TestNewProviderLocalNoPath(t *testing.T) {
+	t.Setenv("PATCODE_LLAMA_SERVER_URL", "")
+	t.Setenv("PATCODE_LLAMA_BIN", "llama-server-that-does-not-exist")
 	_, err := NewProvider(ProviderConfig{
 		Type: "local",
 	})
 	if err == nil {
 		t.Fatal("expected error for local provider without model path")
 	}
-	if !strings.Contains(err.Error(), "model path required") {
+	if !strings.Contains(err.Error(), "requires either") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

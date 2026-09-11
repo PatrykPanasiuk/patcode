@@ -45,10 +45,10 @@ func GlobTool(workdir string) Tool {
 
 			searchPath := workdir
 			if globArgs.Path != "" {
-				if filepath.IsAbs(globArgs.Path) {
-					searchPath = globArgs.Path
-				} else {
-					searchPath = filepath.Join(workdir, globArgs.Path)
+				var err error
+				searchPath, err = confinePath(workdir, globArgs.Path)
+				if err != nil {
+					return &ToolResult{Success: false, Error: err.Error()}
 				}
 			}
 

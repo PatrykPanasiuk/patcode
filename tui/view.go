@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"patcode/session"
+	"patcode/version"
 )
 
 func (m *model) View() string {
@@ -105,7 +106,7 @@ func (m *model) renderMessages() string {
 
 func (m *model) renderHelp() string {
 	help := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(dimColor).
 		Padding(1, 2).
@@ -151,7 +152,7 @@ func (m *model) renderStatusBar() string {
 		statusDot = "●"
 	}
 
-	left := lipgloss.NewStyle().Foreground(dimColor).Render(m.providerType)
+	left := lipgloss.NewStyle().Foreground(dimColor).Render(version.Name + " v" + version.Version + " · " + m.providerType)
 	right := lipgloss.NewStyle().Foreground(statusColor).Render(statusDot + " " + modelLabel)
 
 	return lipgloss.NewStyle().

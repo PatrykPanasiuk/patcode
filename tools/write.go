@@ -40,9 +40,9 @@ func WriteTool(workdir string) Tool {
 				}
 			}
 
-			filePath := writeArgs.FilePath
-			if !filepath.IsAbs(filePath) {
-				filePath = filepath.Join(workdir, filePath)
+			filePath, err := confinePath(workdir, writeArgs.FilePath)
+			if err != nil {
+				return &ToolResult{Success: false, Error: err.Error()}
 			}
 
 			dir := filepath.Dir(filePath)

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -49,10 +48,10 @@ func GrepTool(workdir string) Tool {
 
 			searchPath := workdir
 			if grepArgs.Path != "" {
-				if filepath.IsAbs(grepArgs.Path) {
-					searchPath = grepArgs.Path
-				} else {
-					searchPath = filepath.Join(workdir, grepArgs.Path)
+				var err error
+				searchPath, err = confinePath(workdir, grepArgs.Path)
+				if err != nil {
+					return &ToolResult{Success: false, Error: err.Error()}
 				}
 			}
 

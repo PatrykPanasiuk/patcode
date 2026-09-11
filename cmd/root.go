@@ -2,13 +2,15 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
-	"time"
 
+	"github.com/spf13/cobra"
 	"patcode/agent"
 	"patcode/config"
 	"patcode/llm"
@@ -16,7 +18,7 @@ import (
 	"patcode/session"
 	"patcode/tools"
 	"patcode/tui"
-	"github.com/spf13/cobra"
+	"patcode/version"
 )
 
 var rootCmd = &cobra.Command{
@@ -26,19 +28,19 @@ var rootCmd = &cobra.Command{
 It connects to LLM providers (OpenAI, OpenRouter, Anthropic, Ollama, Local) and helps you write, debug, and refactor code.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-	projectDir := "."
-	if len(args) > 0 {
-		projectDir = args[0]
-	}
-	resolved, err := config.ResolveProjectDir(projectDir)
-	if err != nil {
-		return err
-	}
-	cfg, _, err := config.LoadWithFallback(resolved)
-	if err != nil {
-		return err
-	}
-	return tui.Run(resolved, cfg)
+		projectDir := "."
+		if len(args) > 0 {
+			projectDir = args[0]
+		}
+		resolved, err := config.ResolveProjectDir(projectDir)
+		if err != nil {
+			return err
+		}
+		cfg, _, err := config.LoadWithFallback(resolved)
+		if err != nil {
+			return err
+		}
+		return tui.Run(resolved, cfg)
 	},
 }
 
@@ -72,7 +74,7 @@ var runCmd = &cobra.Command{
 }
 
 var sessionCmd = &cobra.Command{
-	Use:   "session [list|show|delete]",
+	Use:   "session [list|show|restore|delete]",
 	Short: "Manage sessions",
 	Args:  cobra.MaximumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -96,6 +98,11 @@ var sessionCmd = &cobra.Command{
 				return fmt.Errorf("session id required")
 			}
 			return deleteSession(saveDir, args[1])
+		case "restore":
+			if len(args) < 2 {
+				return fmt.Errorf("session id required")
+			}
+			return restoreSession(saveDir, args[1])
 		default:
 			return showSession(saveDir, args[0])
 		}
@@ -103,23 +110,31 @@ var sessionCmd = &cobra.Command{
 }
 
 func listSessions(saveDir string) error {
-	entries, err := os.ReadDir(saveDir)
+	sessions, err := session.ListSessions(saveDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("No sessions found.")
-			return nil
-		}
 		return fmt.Errorf("reading sessions: %w", err)
 	}
-	if len(entries) == 0 {
+	if len(sessions) == 0 {
 		fmt.Println("No sessions found.")
 		return nil
 	}
-	fmt.Printf("Sessions (%d):\n", len(entries))
-	for _, e := range entries {
-		if !e.IsDir() && filepath.Ext(e.Name()) == ".json" {
-			fmt.Printf("  %s\n", strings.TrimSuffix(e.Name(), ".json"))
+
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
+	})
+
+	fmt.Printf("Sessions (%d):\n", len(sessions))
+	for _, s := range sessions {
+		project := s.Project
+		if project == "" {
+			project = "-"
 		}
+		mode := string(s.Mode)
+		if mode == "" {
+			mode = "ask"
+		}
+		fmt.Printf("  %-20s  %-6s  %3d msgs  %s\n",
+			s.ID, mode, len(s.Messages), project)
 	}
 	return nil
 }
@@ -151,6 +166,28 @@ func deleteSession(saveDir, id string) error {
 	}
 	fmt.Printf("Deleted session %s\n", id)
 	return nil
+}
+
+func restoreSession(saveDir, id string) error {
+	sess, err := session.Load(id, saveDir)
+	if err != nil {
+		return fmt.Errorf("loading session %s: %w", id, err)
+	}
+
+	projectDir := sess.Project
+	if projectDir == "" {
+		projectDir = "."
+	}
+	absDir, err := config.ResolveProjectDir(projectDir)
+	if err != nil {
+		return fmt.Errorf("resolving session project: %w", err)
+	}
+	cfg, _, err := config.LoadWithFallback(absDir)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Restoring session %s (%d messages, project %s)\n", sess.ID, len(sess.Messages), absDir)
+	return tui.RunWithSession(absDir, cfg, sess)
 }
 
 var configCmd = &cobra.Command{
@@ -278,7 +315,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("patcode v0.1.0")
+		fmt.Printf("patcode %s\n", version.Version)
 	},
 }
 
@@ -289,22 +326,11 @@ func Execute() {
 	rootCmd.AddCommand(trainCmd)
 	rootCmd.AddCommand(versionCmd)
 
-	go checkUpdateAsync()
+	MaybeCheckForUpdates()
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
-	}
-}
-
-func checkUpdateAsync() {
-	time.Sleep(3 * time.Second)
-	tag := CheckUpdate()
-	if NeedsUpdate(tag) {
-		fmt.Fprintf(os.Stderr, "\n  ╭─ patcode update ─────────────────────╮\n")
-		fmt.Fprintf(os.Stderr, "  │  New version available: %s → %s  │\n", "v"+version, tag)
-		fmt.Fprintf(os.Stderr, "  │  Run  patcode update  to upgrade.    │\n")
-		fmt.Fprintf(os.Stderr, "  ╰──────────────────────────────────────╯\n\n")
 	}
 }
 
@@ -353,7 +379,7 @@ func runHeadless(projectDir, mode, message string) error {
 		return err
 	}
 
-	ag := agent.New(provider, registry, sess, cfg.Model)
+	ag := agent.New(provider, registry, sess, cfg.Model, cfg.MaxTurns)
 	events := make(chan agent.AgentEvent)
 	go ag.Process(context.Background(), message, events)
 
@@ -362,7 +388,7 @@ func runHeadless(projectDir, mode, message string) error {
 		case agent.EventChunk:
 			fmt.Print(ev.Content)
 		case agent.EventError:
-			return fmt.Errorf(ev.Error)
+			return errors.New(ev.Error)
 		}
 	}
 	fmt.Println()

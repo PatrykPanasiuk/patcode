@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -56,7 +57,7 @@ func ParseMode(s string) (Mode, error) {
 		}
 		buf.WriteString(string(m))
 	}
-	return "", fmt.Errorf(buf.String())
+	return "", errors.New(buf.String())
 }
 
 type Session struct {
@@ -96,6 +97,8 @@ Available tools:
 - edit: Make precise edits to files
 - grep: Search file contents with regex
 - glob: Find files matching glob patterns
+- webfetch: Fetch a URL and return its content
+- websearch: Search the web
 
 When in PLAN mode, you should only plan and discuss changes without making modifications.
 When in ASK mode, answer the user's question directly and do not propose or make changes unless asked.

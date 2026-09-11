@@ -6,10 +6,15 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"patcode/config"
+	"patcode/session"
 )
 
 func Run(projectDir string, cfg *config.Config) error {
-	m, err := initialModel(projectDir, cfg)
+	return RunWithSession(projectDir, cfg, nil)
+}
+
+func RunWithSession(projectDir string, cfg *config.Config, sess *session.Session) error {
+	m, err := initialModel(projectDir, cfg, sess)
 	if err != nil {
 		return fmt.Errorf("initializing TUI: %w", err)
 	}

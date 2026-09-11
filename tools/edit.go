@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -46,9 +45,9 @@ func EditTool(workdir string) Tool {
 				}
 			}
 
-			filePath := editArgs.FilePath
-			if !filepath.IsAbs(filePath) {
-				filePath = filepath.Join(workdir, filePath)
+			filePath, err := confinePath(workdir, editArgs.FilePath)
+			if err != nil {
+				return &ToolResult{Success: false, Error: err.Error()}
 			}
 
 			data, err := os.ReadFile(filePath)

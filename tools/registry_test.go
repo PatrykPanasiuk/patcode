@@ -44,40 +44,40 @@ func TestRegistryGetUnknown(t *testing.T) {
 func TestRegistryList(t *testing.T) {
 	r := DefaultRegistry("/tmp")
 	tools := r.List()
-	if len(tools) != 6 {
-		t.Errorf("expected 6 default tools, got %d", len(tools))
+	if len(tools) != 8 {
+		t.Errorf("expected 8 default tools, got %d", len(tools))
 	}
 }
 
 func TestRegistryDefinitions(t *testing.T) {
 	r := DefaultRegistry("/tmp")
 	defs := r.Definitions()
-	if len(defs) != 6 {
-		t.Errorf("expected 6 defs, got %d", len(defs))
+	if len(defs) != 8 {
+		t.Errorf("expected 8 defs, got %d", len(defs))
 	}
 }
 
 func TestRegistryDefinitionsForMode_Ask(t *testing.T) {
 	r := DefaultRegistry("/tmp")
 	defs := r.DefinitionsForMode("ask")
-	if len(defs) != 0 {
-		t.Errorf("expected 0 tools for ask, got %d", len(defs))
+	if len(defs) != 2 {
+		t.Errorf("expected 2 web tools for ask, got %d", len(defs))
 	}
 }
 
 func TestRegistryDefinitionsForMode_Inspect(t *testing.T) {
 	r := DefaultRegistry("/tmp")
 	defs := r.DefinitionsForMode("inspect")
-	if len(defs) != 3 {
-		t.Errorf("expected 3 tools for inspect, got %d", len(defs))
+	if len(defs) != 5 {
+		t.Errorf("expected 5 tools for inspect, got %d", len(defs))
 	}
 }
 
 func TestRegistryDefinitionsForMode_Build(t *testing.T) {
 	r := DefaultRegistry("/tmp")
 	defs := r.DefinitionsForMode("build")
-	if len(defs) != 6 {
-		t.Errorf("expected 6 tools for build, got %d", len(defs))
+	if len(defs) != 8 {
+		t.Errorf("expected 8 tools for build, got %d", len(defs))
 	}
 }
 
@@ -221,7 +221,7 @@ func TestDefaultRegistryTools(t *testing.T) {
 	for _, t := range r.List() {
 		names[t.Name] = true
 	}
-	expected := []string{"bash", "read", "write", "edit", "grep", "glob"}
+	expected := []string{"bash", "read", "write", "edit", "grep", "glob", "webfetch", "websearch"}
 	for _, n := range expected {
 		if !names[n] {
 			t.Errorf("missing tool: %s", n)

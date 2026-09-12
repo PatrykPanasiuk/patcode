@@ -44,15 +44,15 @@ func TestRegistryGetUnknown(t *testing.T) {
 func TestRegistryList(t *testing.T) {
 	r := DefaultRegistry("/tmp")
 	tools := r.List()
-	if len(tools) != 8 {
-		t.Errorf("expected 8 default tools, got %d", len(tools))
+	if len(tools) != 10 {
+		t.Errorf("expected 10 default tools, got %d", len(tools))
 	}
 }
 
 func TestRegistryDefinitions(t *testing.T) {
 	r := DefaultRegistry("/tmp")
 	defs := r.Definitions()
-	if len(defs) != 8 {
+	if len(defs) != 10 {
 		t.Errorf("expected 8 defs, got %d", len(defs))
 	}
 }
@@ -76,8 +76,8 @@ func TestRegistryDefinitionsForMode_Inspect(t *testing.T) {
 func TestRegistryDefinitionsForMode_Build(t *testing.T) {
 	r := DefaultRegistry("/tmp")
 	defs := r.DefinitionsForMode("build")
-	if len(defs) != 8 {
-		t.Errorf("expected 8 tools for build, got %d", len(defs))
+	if len(defs) != 10 {
+		t.Errorf("expected 10 tools for build, got %d", len(defs))
 	}
 }
 

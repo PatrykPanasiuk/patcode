@@ -141,8 +141,8 @@ func TestAllowedToolNames_Inspect(t *testing.T) {
 
 func TestAllowedToolNames_Build(t *testing.T) {
 	names := AllowedToolNames("build")
-	if len(names) != 8 {
-		t.Errorf("expected 8 tools for build, got %d: %v", len(names), names)
+	if len(names) != 10 {
+		t.Errorf("expected 10 tools for build, got %d: %v", len(names), names)
 	}
 }
 

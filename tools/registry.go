@@ -82,6 +82,8 @@ func DefaultRegistry(workdir string) *Registry {
 	r.Register(GlobTool(workdir))
 	r.Register(WebFetchTool(workdir))
 	r.Register(WebSearchTool(workdir))
+	r.Register(ServeTool(workdir))
+	r.Register(StopServeTool(workdir))
 	return r
 }
 

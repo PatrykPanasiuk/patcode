@@ -19,7 +19,7 @@ func RunWithSession(projectDir string, cfg *config.Config, sess *session.Session
 		return fmt.Errorf("initializing TUI: %w", err)
 	}
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 		return err

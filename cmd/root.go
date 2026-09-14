@@ -326,6 +326,7 @@ func Execute() {
 	rootCmd.AddCommand(trainCmd)
 	rootCmd.AddCommand(versionCmd)
 
+	PrintBrandArt()
 	MaybeCheckForUpdates()
 
 	if err := rootCmd.Execute(); err != nil {

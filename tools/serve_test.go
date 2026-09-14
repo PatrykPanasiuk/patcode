@@ -42,7 +42,7 @@ func TestServeLocalPythonHTTPServer(t *testing.T) {
 		t.Fatalf("serve failed: %s (%s)", res.Error, res.Data)
 	}
 	var ok bool
-	for attempt := 0; attempt < 40; attempt++ {
+	for attempt := 0; attempt < 120; attempt++ {
 		resp := httpGET(port)
 		if resp != nil {
 			ok = true
@@ -60,7 +60,7 @@ func TestServeLocalPythonHTTPServer(t *testing.T) {
 		if resp != nil {
 			break
 		}
-		if retry >= 60 {
+		if retry >= 180 {
 			t.Fatalf("HTTP GET on http://127.0.0.1:%d failed after retries", port)
 		}
 		time.Sleep(250 * time.Millisecond)

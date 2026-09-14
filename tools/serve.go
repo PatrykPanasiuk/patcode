@@ -32,10 +32,29 @@ type StopServeArgs struct {
 	Port int `json:"port"`
 }
 
+// lockedBuf is a mutex-guarded buffer; it is safe to hand to cmd.Stdout
+// (written by the child process goroutine) while readers call String().
+type lockedBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuf) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
 type ServeProcess struct {
 	Cmd  *exec.Cmd
 	Port int
-	Logs *bytes.Buffer
+	Logs *lockedBuf
 	mu   sync.Mutex
 }
 
@@ -117,7 +136,7 @@ func ServeTool(workdir string) Tool {
 				cmdWorkdir = s.Workdir
 			}
 
-			logs := &bytes.Buffer{}
+			logs := &lockedBuf{}
 			cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 			cmd.Dir = cmdWorkdir
 			cmd.Stdout = logs

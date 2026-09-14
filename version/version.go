@@ -13,4 +13,4 @@ const Name = "patcode"
 // Version is the current release version (with the "v" prefix). It is
 // overridden at build time by the release pipeline (see .goreleaser.yaml
 // ldflags), which stamps the leading-tag form such as "v1.2.3".
-var Version = "v0.1.0"
+var Version = "v0.2.0"
